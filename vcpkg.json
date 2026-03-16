@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "dearapi",
+  "version": "0.1.0",
+  "description": "Cross-platform HTTP API client",
+  "builtin-baseline": "58950f88544e4637524dbd6a01d0317cf4cb77fc",
+  "dependencies": [
+    "wxwidgets",
+    {
+      "name": "boost-beast",
+      "features": []
+    },
+    "boost-asio",
+    "openssl",
+    "sqlite3"
+  ]
+}
