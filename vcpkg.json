@@ -12,6 +12,7 @@
     },
     "boost-asio",
     "openssl",
-    "sqlite3"
+    "sqlite3",
+    "gtest"
   ]
 }

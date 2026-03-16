@@ -39,6 +39,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(wxWidgets REQUIRED COMPONENTS core base aui)
 include(${wxWidgets_USE_FILE})
 
+find_package(GTest CONFIG REQUIRED)
+
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
@@ -50,7 +52,19 @@ add_executable(dearapi
     src/request_tab.cpp
     src/http_client.cpp
     src/db_store.cpp
+    src/curl_parser.cpp
 )
+
+# ── tests ──────────────────────────────────────────────────────────────────────
+enable_testing()
+
+add_executable(dearapi_tests
+    tests/curl_parser_test.cpp
+    src/curl_parser.cpp
+)
+target_include_directories(dearapi_tests PRIVATE include)
+target_link_libraries(dearapi_tests PRIVATE GTest::gtest_main OpenSSL::Crypto)
+add_test(NAME dearapi_tests COMMAND dearapi_tests)
 
 target_include_directories(dearapi PRIVATE src include)
 

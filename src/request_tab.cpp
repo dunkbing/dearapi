@@ -1,5 +1,7 @@
 #include "request_tab.hpp"
 
+#include "curl_parser.hpp"
+#include <algorithm>
 #include <format>
 #include <thread>
 #include <wx/thread.h>
@@ -249,8 +251,27 @@ void RequestTab::BuildUI() {
         PopupMenu(&menu);
     });
 
-    // ── dirty tracking ────────────────────────────────────────────────────────
+    // ── dirty tracking + curl paste detection ────────────────────────────────
     m_urlInput->Bind(wxEVT_TEXT, [this](wxCommandEvent& e) {
+        std::string val = m_urlInput->GetValue().ToStdString();
+        // check if the pasted value looks like a curl command
+        std::string trimmed = val;
+        size_t s = trimmed.find_first_not_of(" \t\r\n");
+        if (s != std::string::npos) {
+            if (trimmed[s] == '$')
+                s = trimmed.find_first_not_of(" \t", s + 1);
+        }
+        if (s != std::string::npos) {
+            std::string prefix = trimmed.substr(s, 5);
+            std::transform(prefix.begin(), prefix.end(), prefix.begin(), ::tolower);
+            if (prefix == "curl ") {
+                HttpRequest parsed = ParseCurl(val);
+                if (!parsed.url.empty()) {
+                    LoadRequest(parsed);
+                    return; // LoadRequest clears dirty; don't skip so field shows url
+                }
+            }
+        }
         MarkDirty();
         e.Skip();
     });
