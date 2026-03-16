@@ -9,6 +9,7 @@
 #include <wx/treectrl.h>
 #include <wx/wx.h>
 
+#include "app_gate.hpp"
 #include "db_store.hpp"
 #include "request_tab.hpp"
 
@@ -41,7 +42,7 @@ struct HistoryItem {
 
 class MainFrame : public wxFrame {
 public:
-    MainFrame();
+    explicit MainFrame(std::shared_ptr<AppGate> gate);
 
 private:
     // top bar
@@ -65,6 +66,9 @@ private:
     // history
     wxListBox* m_historyList{};
     std::vector<HistoryItem> m_history;
+
+    // app-level posting gate (outlives all tabs)
+    std::shared_ptr<AppGate> m_gate;
 
     // main tab area
     wxAuiNotebook* m_notebook{};

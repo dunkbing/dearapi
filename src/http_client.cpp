@@ -87,6 +87,8 @@ HttpResponse sendRequest(const HttpRequest& req) {
         if (parsed.scheme == "https") {
             ssl::context ctx{ssl::context::tlsv12_client};
             ctx.set_default_verify_paths();
+            ctx.set_verify_mode(ssl::verify_peer);
+            ctx.set_verify_callback(ssl::host_name_verification(parsed.host));
             beast::ssl_stream<beast::tcp_stream> stream{ioc, ctx};
 
             if (!SSL_set_tlsext_host_name(stream.native_handle(), parsed.host.c_str()))

@@ -65,8 +65,9 @@ wxBitmap MainFrame::ArrowBitmap(bool pointLeft) {
 // ── constructor
 // ───────────────────────────────────────────────────────────────
 
-MainFrame::MainFrame()
-    : wxFrame(nullptr, wxID_ANY, "DearAPI", wxDefaultPosition, wxSize(1280, 800)) {
+MainFrame::MainFrame(std::shared_ptr<AppGate> gate)
+    : wxFrame(nullptr, wxID_ANY, "DearAPI", wxDefaultPosition, wxSize(1280, 800)),
+      m_gate(std::move(gate)) {
     m_db = std::make_unique<DBStore>();
     wxString dataDir = wxStandardPaths::Get().GetUserDataDir();
     wxFileName::Mkdir(dataDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
@@ -194,7 +195,7 @@ void MainFrame::BuildUI() {
 // ────────────────────────────────────────────────────────────
 
 RequestTab* MainFrame::NewTab(const std::string& name) {
-    auto* tab = new RequestTab(m_notebook, name);
+    auto* tab = new RequestTab(m_notebook, name, m_gate);
 
     tab->onSave = [this, tab](const HttpRequest& req, const std::string& suggested) {
         if (tab->GetSavedId() != 0) {
@@ -348,6 +349,17 @@ void MainFrame::OnTreeBeginDrag(wxTreeEvent& evt) {
     evt.Allow();
 }
 
+// returns true if `candidate` is the same as or a descendant of `ancestor`
+static bool IsFolderDescendant(DBStore* db, int64_t candidate, int64_t ancestor) {
+    if (candidate == ancestor)
+        return true;
+    for (auto& child : db->getFolders(ancestor)) {
+        if (IsFolderDescendant(db, candidate, child.id))
+            return true;
+    }
+    return false;
+}
+
 void MainFrame::OnTreeEndDrag(wxTreeEvent& evt) {
     if (!m_dragItem.IsOk())
         return;
@@ -368,6 +380,11 @@ void MainFrame::OnTreeEndDrag(wxTreeEvent& evt) {
                                                              : m_db->getRequest(tgt->id).folderId)
             : 0;
 
+    // prevent creating a cycle by dragging a folder into one of its own descendants
+    if (src->type == CollectionItemData::Type::Folder &&
+        IsFolderDescendant(m_db.get(), newParent, src->id))
+        return;
+
     if (src->type == CollectionItemData::Type::Folder)
         m_db->moveFolder(src->id, newParent);
     else
@@ -386,6 +403,11 @@ void MainFrame::OnTreeEndLabelEdit(wxTreeEvent& evt) {
     if (d->type == CollectionItemData::Type::Folder) {
         m_db->renameFolder(d->id, newName);
     } else {
+        // tree label is "METHOD  name"; strip the prefix so we only store the name
+        std::string method = m_db->getRequest(d->id).request.method;
+        std::string prefix = method + "  ";
+        if (newName.starts_with(prefix))
+            newName = newName.substr(prefix.size());
         m_db->renameRequest(d->id, newName);
         CallAfter([this]() { RebuildTree(); });
         evt.Veto();

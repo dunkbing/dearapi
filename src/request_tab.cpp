@@ -4,9 +4,6 @@
 #include <algorithm>
 #include <format>
 #include <thread>
-#include <wx/thread.h>
-
-wxDEFINE_EVENT(EVT_HTTP_RESPONSE, wxThreadEvent);
 
 // ── method colours
 // ────────────────────────────────────────────────────────────
@@ -96,8 +93,13 @@ void RequestTab::SetGridRows(wxGrid* grid, const std::map<std::string, std::stri
 // ── constructor
 // ───────────────────────────────────────────────────────────────
 
-RequestTab::RequestTab(wxWindow* parent, const std::string& name) : wxPanel(parent), m_name(name) {
+RequestTab::RequestTab(wxWindow* parent, const std::string& name, std::shared_ptr<AppGate> gate)
+    : wxPanel(parent), m_name(name), m_gate(std::move(gate)) {
     BuildUI();
+}
+
+RequestTab::~RequestTab() {
+    m_alive->store(false); // signal any in-flight thread not to post back
 }
 
 // ── method button
@@ -296,7 +298,6 @@ void RequestTab::BuildUI() {
 
     m_sendButton->Bind(wxEVT_BUTTON, &RequestTab::OnSend, this);
     m_urlInput->Bind(wxEVT_TEXT_ENTER, &RequestTab::OnSend, this);
-    Bind(EVT_HTTP_RESPONSE, &RequestTab::OnResponse, this);
 }
 
 // ── request building / loading
@@ -352,6 +353,11 @@ HttpRequest RequestTab::GetRequest() const {
 
 void RequestTab::LoadRequest(const HttpRequest& req) {
     m_loading = true;
+
+    // clear params grid so stale rows don't leak into the next BuildCurrentRequest()
+    if (m_paramsGrid->GetNumberRows() > 0)
+        m_paramsGrid->DeleteRows(0, m_paramsGrid->GetNumberRows());
+    m_paramsGrid->AppendRows(1);
 
     // SetMethod doesn't call MarkDirty while m_loading, but it still
     // recolours the button — use it directly
@@ -410,21 +416,31 @@ void RequestTab::OnSend(wxCommandEvent&) {
     m_sendButton->Disable();
     m_statusLabel->SetLabel("Sending...");
 
+    // snapshot everything the thread needs — no this access inside the thread body
     HttpRequest req = BuildCurrentRequest();
-    std::thread([this, req]() {
-        HttpResponse res = sendRequest(req);
-        auto* evt = new wxThreadEvent(EVT_HTTP_RESPONSE);
-        evt->SetPayload<HttpResponse>(res);
-        wxQueueEvent(this, evt);
+    auto alive = m_alive;
+    auto gate = m_gate;
+    RequestTab* self = this;
+    std::thread([req, alive, gate, self]() {
+        HttpResponse res = sendRequest(req); // pure data, no this
+        // gate->post holds AppGate::m_mu while calling CallAfter.
+        // AppGate::shutdown() acquires the same mutex before setting alive=false.
+        // So it is impossible for this callback to reach CallAfter after the app
+        // has started tearing down wxTheApp.
+        if (gate)
+            gate->post([res, req, alive, self]() {
+                if (!alive->load())
+                    return;
+                self->HandleResponse(res, req);
+            });
     }).detach();
 }
 
-void RequestTab::OnResponse(wxThreadEvent& evt) {
+void RequestTab::HandleResponse(const HttpResponse& res, const HttpRequest& req) {
     m_sendButton->Enable();
-    auto res = evt.GetPayload<HttpResponse>();
 
     if (onRequestComplete)
-        onRequestComplete(BuildCurrentRequest());
+        onRequestComplete(req); // exact snapshot of what was sent
 
     if (!res.success()) {
         m_statusLabel->SetLabel("Error: " + res.error);

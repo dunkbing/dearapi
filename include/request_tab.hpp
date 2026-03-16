@@ -1,6 +1,8 @@
 #pragma once
+#include <atomic>
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <wx/aui/auibook.h>
 #include <wx/grid.h>
@@ -8,16 +10,17 @@
 #include <wx/splitter.h>
 #include <wx/wx.h>
 
+#include "app_gate.hpp"
 #include "http_client.hpp"
-
-wxDECLARE_EVENT(EVT_HTTP_RESPONSE, wxThreadEvent);
 
 // returns a distinctive colour for each HTTP method
 wxColour MethodColor(const std::string& method);
 
 class RequestTab : public wxPanel {
 public:
-    explicit RequestTab(wxWindow* parent, const std::string& name = "New Request");
+    explicit RequestTab(wxWindow* parent, const std::string& name = "New Request",
+                        std::shared_ptr<AppGate> gate = nullptr);
+    ~RequestTab();
 
     void LoadRequest(const HttpRequest& req);
     HttpRequest GetRequest() const;
@@ -49,6 +52,8 @@ private:
     int64_t m_savedId{0};
     bool m_dirty{false};
     bool m_loading{false};
+    std::shared_ptr<AppGate> m_gate;
+    std::shared_ptr<std::atomic<bool>> m_alive{std::make_shared<std::atomic<bool>>(true)};
 
     wxButton* m_methodBtn{};
     std::string m_currentMethod{"GET"};
@@ -72,5 +77,5 @@ private:
     HttpRequest BuildCurrentRequest() const;
 
     void OnSend(wxCommandEvent&);
-    void OnResponse(wxThreadEvent&);
+    void HandleResponse(const HttpResponse& res, const HttpRequest& req);
 };
