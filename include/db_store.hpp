@@ -61,6 +61,9 @@ public:
     std::vector<SavedRequest> getRequests(int64_t collectionId, int64_t folderId = 0) const;
     SavedRequest getRequest(int64_t id) const;
 
+    void beginTransaction();
+    void commit();
+
 private:
     sqlite3* m_db{};
     void initSchema();

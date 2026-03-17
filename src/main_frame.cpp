@@ -1,8 +1,6 @@
 #include "main_frame.hpp"
-#include <algorithm>
+#include "importer.hpp"
 #include <format>
-#include <fstream>
-#include <nlohmann/json.hpp>
 #include <wx/artprov.h>
 #include <wx/aui/tabart.h>
 #include <wx/filedlg.h>
@@ -253,12 +251,21 @@ void MainFrame::DoNewTab() {
 }
 
 void MainFrame::DoImport() {
-    wxFileDialog dlg(this, "Import Swagger / OpenAPI", "", "",
+    wxFileDialog dlg(this, "Import Collection or API Spec", "", "",
                      "JSON files (*.json)|*.json|All files (*.*)|*.*",
                      wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (dlg.ShowModal() != wxID_OK)
         return;
-    ImportSwagger(dlg.GetPath().ToStdString());
+
+    auto result = Importer::importFile(*m_db, dlg.GetPath().ToStdString());
+    if (!result.ok()) {
+        wxMessageBox(result.error, "Import Error", wxOK | wxICON_ERROR, this);
+        return;
+    }
+    RebuildTree();
+    m_sidebarTabs->SetSelection(0);
+    wxMessageBox(std::format("Imported {} requests into \"{}\".", result.count, result.collName),
+                 "Import Complete", wxOK | wxICON_INFORMATION, this);
 }
 
 void MainFrame::UpdateRightView() {
@@ -692,154 +699,4 @@ void MainFrame::OnMenuOpenCollection(wxCommandEvent&) {
         std::string text = m_tree->GetItemText(sel).ToStdString();
         OpenInCollectionTab(d->id, text);
     }
-}
-
-// ── import
-// ───────────────────────────────────────────────────────────────────
-
-void MainFrame::ImportSwagger(const std::string& path) {
-    nlohmann::json doc;
-    try {
-        std::ifstream f(path);
-        f >> doc;
-    } catch (...) {
-        wxMessageBox("Failed to parse JSON.", "Import Error", wxOK | wxICON_ERROR, this);
-        return;
-    }
-
-    bool isV2 = doc.contains("swagger");
-    bool isV3 = doc.contains("openapi");
-    if ((!isV2 && !isV3) || !doc.contains("paths")) {
-        wxMessageBox("Unrecognized format. Expected Swagger 2.0 or OpenAPI 3.x with paths.",
-                     "Import Error", wxOK | wxICON_ERROR, this);
-        return;
-    }
-
-    // base URL
-    std::string baseUrl;
-    if (isV2) {
-        std::string host = doc.value("host", "");
-        std::string basePath = doc.value("basePath", "");
-        std::string scheme = "https";
-        if (doc.contains("schemes") && !doc["schemes"].empty())
-            scheme = doc["schemes"][0].get<std::string>();
-        baseUrl = host.empty() ? basePath : (scheme + "://" + host + basePath);
-    } else {
-        if (doc.contains("servers") && !doc["servers"].empty())
-            baseUrl = doc["servers"][0].value("url", "");
-    }
-
-    // collection name from info.title or filename
-    std::string collName;
-    if (doc.contains("info") && doc["info"].is_object())
-        collName = doc["info"].value("title", "");
-    if (collName.empty())
-        collName = wxFileName(path).GetName().ToStdString();
-
-    // create a collection for this import
-    int64_t rootCollId = m_db->createCollection(collName);
-
-    // store base URL as a collection variable so requests can use {{basePath}}
-    if (!baseUrl.empty())
-        m_db->setCollectionVariables(rootCollId,
-                                     {CollectionVariable{"basePath", baseUrl, "base url"}});
-
-    std::map<std::string, int64_t> tagFolders;
-    auto tagFolder = [&](const std::string& tag) -> int64_t {
-        auto [it, inserted] = tagFolders.emplace(tag, 0);
-        if (inserted)
-            it->second = m_db->createFolder(tag, rootCollId, 0);
-        return it->second;
-    };
-
-    static const std::string kMethods[] = {"get",    "post", "put",    "patch",
-                                           "delete", "head", "options"};
-    int count = 0;
-
-    for (auto& [pathStr, pathItem] : doc["paths"].items()) {
-        // path-level parameters shared by all methods
-        std::vector<nlohmann::json> pathParams;
-        if (pathItem.contains("parameters") && pathItem["parameters"].is_array())
-            pathParams = pathItem["parameters"].get<std::vector<nlohmann::json>>();
-
-        for (auto& m : kMethods) {
-            if (!pathItem.contains(m))
-                continue;
-            auto& op = pathItem[m];
-
-            // merge path-level + operation-level parameters
-            std::vector<nlohmann::json> params = pathParams;
-            if (op.contains("parameters") && op["parameters"].is_array())
-                for (auto& p : op["parameters"])
-                    params.push_back(p);
-
-            HttpRequest req;
-            req.method = m;
-            std::transform(req.method.begin(), req.method.end(), req.method.begin(), ::toupper);
-            req.url = (baseUrl.empty() ? "" : "{{basePath}}") + pathStr;
-
-            // query params → append as named placeholders; header params → empty header
-            std::string qs;
-            for (auto& p : params) {
-                std::string in = p.value("in", "");
-                std::string pname = p.value("name", "");
-                if (pname.empty())
-                    continue;
-                if (in == "query")
-                    qs += (qs.empty() ? "?" : "&") + pname + "=";
-                else if (in == "header")
-                    req.headers[pname] = "";
-            }
-            req.url += qs;
-
-            // content-type from body parameters
-            if (isV2) {
-                bool hasBody = false, hasForm = false;
-                for (auto& p : params) {
-                    std::string in = p.value("in", "");
-                    if (in == "body")
-                        hasBody = true;
-                    else if (in == "formData")
-                        hasForm = true;
-                }
-                if (hasForm)
-                    req.headers["Content-Type"] = "application/x-www-form-urlencoded";
-                else if (hasBody)
-                    req.headers["Content-Type"] = "application/json";
-            } else if (op.contains("requestBody")) {
-                auto& rb = op["requestBody"];
-                if (rb.contains("content") && rb["content"].is_object()) {
-                    auto& ct = rb["content"];
-                    if (ct.contains("application/json"))
-                        req.headers["Content-Type"] = "application/json";
-                    else if (ct.contains("multipart/form-data"))
-                        req.headers["Content-Type"] = "multipart/form-data";
-                    else if (ct.contains("application/x-www-form-urlencoded"))
-                        req.headers["Content-Type"] = "application/x-www-form-urlencoded";
-                }
-            }
-
-            // request name: operationId > summary > METHOD /path
-            std::string name;
-            if (op.contains("operationId") && op["operationId"].is_string())
-                name = op["operationId"].get<std::string>();
-            else if (op.contains("summary") && op["summary"].is_string())
-                name = op["summary"].get<std::string>();
-            else
-                name = req.method + " " + pathStr;
-
-            // folder: first tag > root (folder_id=0 means directly under collection)
-            int64_t folderId = 0;
-            if (op.contains("tags") && op["tags"].is_array() && !op["tags"].empty())
-                folderId = tagFolder(op["tags"][0].get<std::string>());
-
-            m_db->saveRequest(name, rootCollId, folderId, req);
-            ++count;
-        }
-    }
-
-    RebuildTree();
-    m_sidebarTabs->SetSelection(0);
-    wxMessageBox(std::format("Imported {} requests into \"{}\".", count, collName),
-                 "Import Complete", wxOK | wxICON_INFORMATION, this);
 }

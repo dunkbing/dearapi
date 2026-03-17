@@ -89,6 +89,14 @@ void DBStore::initSchema() {
     }
 }
 
+void DBStore::beginTransaction() {
+    exec("BEGIN");
+}
+
+void DBStore::commit() {
+    exec("COMMIT");
+}
+
 void DBStore::exec(const std::string& sql) const {
     char* err{};
     sqlite3_exec(m_db, sql.c_str(), nullptr, nullptr, &err);

@@ -96,7 +96,6 @@ private:
     int64_t ContextFolderId() const;
     int64_t GetOrAutoSelectCollection();
     int64_t SaveRequest(const HttpRequest& req, const std::string& suggestedName);
-    void ImportSwagger(const std::string& path);
     void AddToHistory(const HttpRequest& req);
 
     // event handlers

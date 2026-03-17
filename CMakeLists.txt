@@ -70,6 +70,7 @@ add_executable(dearapi
     src/db_store.cpp
     src/curl_parser.cpp
     src/collection_tab.cpp
+    src/importer.cpp
 )
 
 # ── tests ──────────────────────────────────────────────────────────────────────
