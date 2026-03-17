@@ -36,7 +36,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(wxWidgets REQUIRED COMPONENTS core base aui)
+find_package(wxWidgets REQUIRED COMPONENTS core base aui stc)
 include(${wxWidgets_USE_FILE})
 
 find_package(GTest CONFIG REQUIRED)

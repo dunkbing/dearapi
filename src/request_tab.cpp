@@ -74,6 +74,75 @@ static void BindColLabelPaint(wxGrid* grid) {
     });
 }
 
+// ── STC helpers
+// ─────────────────────────────────────────────────────────────────
+
+static void SetupStc(wxStyledTextCtrl* stc, bool readOnly) {
+    stc->StyleSetForeground(wxSTC_STYLE_DEFAULT, wxColour(0xAB, 0xB2, 0xBF));
+    stc->StyleSetBackground(wxSTC_STYLE_DEFAULT, wxColour(0x28, 0x2C, 0x34));
+    stc->StyleClearAll();
+    stc->SetCaretForeground(wxColour(0xAB, 0xB2, 0xBF));
+    stc->SetFont(wxFont(wxFontInfo(10).Family(wxFONTFAMILY_TELETYPE)));
+    stc->SetWrapMode(wxSTC_WRAP_NONE);
+    stc->SetScrollWidth(1);
+    stc->SetScrollWidthTracking(true);
+    stc->SetTabWidth(2);
+    stc->SetUseTabs(false);
+    stc->SetMarginWidth(0, 0);
+    stc->SetMarginWidth(1, 0);
+    if (readOnly)
+        stc->SetReadOnly(true);
+}
+
+static void ApplyStcLexer(wxStyledTextCtrl* stc, int lexer) {
+    stc->SetLexer(lexer);
+    stc->StyleClearAll();
+    if (lexer == wxSTC_LEX_JSON) {
+        stc->StyleSetForeground(wxSTC_JSON_NUMBER, wxColour(0xD1, 0x9A, 0x66));
+        stc->StyleSetForeground(wxSTC_JSON_STRING, wxColour(0x98, 0xC3, 0x79));
+        stc->StyleSetForeground(wxSTC_JSON_STRINGEOL, wxColour(0xE0, 0x6C, 0x75));
+        stc->StyleSetForeground(wxSTC_JSON_PROPERTYNAME, wxColour(0xE0, 0x6C, 0x75));
+        stc->StyleSetForeground(wxSTC_JSON_ESCAPESEQUENCE, wxColour(0x56, 0xB6, 0xC2));
+        stc->StyleSetForeground(wxSTC_JSON_LINECOMMENT, wxColour(0x5C, 0x63, 0x70));
+        stc->StyleSetForeground(wxSTC_JSON_BLOCKCOMMENT, wxColour(0x5C, 0x63, 0x70));
+        stc->StyleSetForeground(wxSTC_JSON_OPERATOR, wxColour(0xAB, 0xB2, 0xBF));
+        stc->StyleSetForeground(wxSTC_JSON_URI, wxColour(0x61, 0xAF, 0xEF));
+        stc->StyleSetForeground(wxSTC_JSON_KEYWORD, wxColour(0xC6, 0x78, 0xDD));
+    } else if (lexer == wxSTC_LEX_HTML) {
+        stc->StyleSetForeground(wxSTC_H_TAG, wxColour(0xE0, 0x6C, 0x75));
+        stc->StyleSetForeground(wxSTC_H_TAGUNKNOWN, wxColour(0xE0, 0x6C, 0x75));
+        stc->StyleSetForeground(wxSTC_H_ATTRIBUTE, wxColour(0xD1, 0x9A, 0x66));
+        stc->StyleSetForeground(wxSTC_H_ATTRIBUTEUNKNOWN, wxColour(0xD1, 0x9A, 0x66));
+        stc->StyleSetForeground(wxSTC_H_NUMBER, wxColour(0xD1, 0x9A, 0x66));
+        stc->StyleSetForeground(wxSTC_H_DOUBLESTRING, wxColour(0x98, 0xC3, 0x79));
+        stc->StyleSetForeground(wxSTC_H_SINGLESTRING, wxColour(0x98, 0xC3, 0x79));
+        stc->StyleSetForeground(wxSTC_H_COMMENT, wxColour(0x5C, 0x63, 0x70));
+        stc->StyleSetForeground(wxSTC_H_ENTITY, wxColour(0xC6, 0x78, 0xDD));
+    } else if (lexer == wxSTC_LEX_XML) {
+        stc->StyleSetForeground(wxSTC_H_TAG, wxColour(0xE0, 0x6C, 0x75));
+        stc->StyleSetForeground(wxSTC_H_TAGUNKNOWN, wxColour(0xE0, 0x6C, 0x75));
+        stc->StyleSetForeground(wxSTC_H_ATTRIBUTE, wxColour(0xD1, 0x9A, 0x66));
+        stc->StyleSetForeground(wxSTC_H_ATTRIBUTEUNKNOWN, wxColour(0xD1, 0x9A, 0x66));
+        stc->StyleSetForeground(wxSTC_H_DOUBLESTRING, wxColour(0x98, 0xC3, 0x79));
+        stc->StyleSetForeground(wxSTC_H_SINGLESTRING, wxColour(0x98, 0xC3, 0x79));
+        stc->StyleSetForeground(wxSTC_H_COMMENT, wxColour(0x5C, 0x63, 0x70));
+    } else if (lexer == wxSTC_LEX_CPP) { // JavaScript
+        stc->StyleSetForeground(wxSTC_C_COMMENT, wxColour(0x5C, 0x63, 0x70));
+        stc->StyleSetForeground(wxSTC_C_COMMENTLINE, wxColour(0x5C, 0x63, 0x70));
+        stc->StyleSetForeground(wxSTC_C_COMMENTDOC, wxColour(0x5C, 0x63, 0x70));
+        stc->StyleSetForeground(wxSTC_C_NUMBER, wxColour(0xD1, 0x9A, 0x66));
+        stc->StyleSetForeground(wxSTC_C_WORD, wxColour(0xC6, 0x78, 0xDD));
+        stc->StyleSetForeground(wxSTC_C_STRING, wxColour(0x98, 0xC3, 0x79));
+        stc->StyleSetForeground(wxSTC_C_CHARACTER, wxColour(0x98, 0xC3, 0x79));
+        stc->StyleSetForeground(wxSTC_C_OPERATOR, wxColour(0xAB, 0xB2, 0xBF));
+        stc->StyleSetForeground(wxSTC_C_STRINGEOL, wxColour(0xE0, 0x6C, 0x75));
+        stc->SetKeyWords(
+            0, "break case catch class const continue debugger default delete do else "
+               "export extends finally for function if import in instanceof let new "
+               "return static super switch this throw try typeof var void while with yield");
+    }
+}
+
 // renders grey placeholder text when a cell is empty
 class PlaceholderRenderer : public wxGridCellStringRenderer {
 public:
@@ -459,7 +528,8 @@ void RequestTab::SelectBodyMode(int mode) {
     }
     m_bodyBook->SetSelection(mode);
     m_rawExtraPanel->Show(mode == 3);
-    m_rawExtraPanel->GetParent()->Layout();
+    // layout bodyPanel (grandparent of radioBar) so radioBar gets correct height allocation
+    m_rawExtraPanel->GetParent()->GetParent()->Layout();
     if (!m_loading)
         SetDirty(true);
 }
@@ -603,11 +673,16 @@ void RequestTab::BuildUI() {
     m_rawTypeChoice =
         new wxChoice(m_rawExtraPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, rawTypes);
     m_rawTypeChoice->SetSelection(0);
-    m_rawTypeChoice->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { MarkDirty(); });
+    m_rawTypeChoice->SetMinSize(wxSize(-1, 34));
+    m_rawTypeChoice->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
+        ApplyBodyLexer(m_rawTypeChoice->GetSelection());
+        MarkDirty();
+    });
     auto* beautifyBtn = new wxButton(m_rawExtraPanel, wxID_ANY, "Beautify");
+    beautifyBtn->SetMinSize(wxSize(-1, 34));
     beautifyBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         // simple JSON pretty-printer
-        std::string s = m_bodyInput->GetValue().ToStdString();
+        std::string s = m_bodyInput->GetText().ToStdString();
         std::string out;
         out.reserve(s.size() * 2); // formatted output is typically larger than input
         int indent = 0;
@@ -644,7 +719,7 @@ void RequestTab::BuildUI() {
             }
         }
         if (!out.empty())
-            m_bodyInput->SetValue(wxString::FromUTF8(out));
+            m_bodyInput->SetText(wxString::FromUTF8(out));
     });
     rawExtraSizer->Add(m_rawTypeChoice, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     rawExtraSizer->Add(beautifyBtn, 0, wxALIGN_CENTER_VERTICAL);
@@ -652,6 +727,7 @@ void RequestTab::BuildUI() {
     m_rawExtraPanel->Hide();
     radioSizer->Add(m_rawExtraPanel, 0, wxALIGN_CENTER_VERTICAL);
     radioBar->SetSizer(radioSizer);
+    radioBar->SetMinSize(wxSize(-1, 38));
 
     // body book — one page per mode
     m_bodyBook = new wxSimplebook(bodyPanel);
@@ -717,9 +793,10 @@ void RequestTab::BuildUI() {
         MakeKVPanel(m_bodyBook, "URL Encoded", m_urlEncodedGrid, m_urlEncodedRaw, m_urlEncodedBook),
         "");
     // page 3: raw
-    m_bodyInput = new wxTextCtrl(m_bodyBook, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
-                                 wxTE_MULTILINE | wxTE_DONTWRAP | wxHSCROLL | wxBORDER_NONE);
-    m_bodyInput->SetFont(wxFont(wxFontInfo(10).Family(wxFONTFAMILY_TELETYPE)));
+    m_bodyInput =
+        new wxStyledTextCtrl(m_bodyBook, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE);
+    SetupStc(m_bodyInput, false);
+    ApplyStcLexer(m_bodyInput, wxSTC_LEX_JSON); // default: JSON
     m_bodyBook->AddPage(m_bodyInput, "");
     // page 4: binary
     {
@@ -765,9 +842,9 @@ void RequestTab::BuildUI() {
 
     auto* resNotebook = new wxNotebook(resPanel, wxID_ANY);
 
-    m_responseBody = new wxTextCtrl(resNotebook, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
-                                    wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP | wxHSCROLL);
-    m_responseBody->SetFont(wxFont(wxFontInfo(10).Family(wxFONTFAMILY_TELETYPE)));
+    m_responseBody = new wxStyledTextCtrl(resNotebook, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                          wxBORDER_NONE);
+    SetupStc(m_responseBody, true);
     resNotebook->AddPage(m_responseBody, "Body");
 
     m_responseHeadersGrid = MakeKeyValueGrid(resNotebook, false);
@@ -823,10 +900,7 @@ void RequestTab::BuildUI() {
         MarkDirty();
         e.Skip();
     });
-    m_bodyInput->Bind(wxEVT_TEXT, [this](wxCommandEvent& e) {
-        MarkDirty();
-        e.Skip();
-    });
+    m_bodyInput->Bind(wxEVT_STC_CHANGE, [this](wxStyledTextEvent&) { MarkDirty(); });
 
     // ── Ctrl+S / Cmd+S save ───────────────────────────────────────────────────
     Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent& evt) {
@@ -918,7 +992,7 @@ HttpRequest RequestTab::BuildCurrentRequest() const {
         break;
     }
     case 3: { // raw
-        req.body = m_bodyInput->GetValue().ToStdString();
+        req.body = m_bodyInput->GetText().ToStdString();
         if (req.headers.find("Content-Type") == req.headers.end()) {
             int sel = m_rawTypeChoice->GetSelection();
             if (sel == 0)
@@ -986,7 +1060,7 @@ void RequestTab::LoadRequest(const HttpRequest& req) {
             m_urlEncodedRaw->SetValue(MapToRaw(fields));
         } else {
             m_bodyMode = 3; // default to raw for any other content type
-            m_bodyInput->SetValue(wxString::FromUTF8(req.body.c_str(), req.body.size()));
+            m_bodyInput->SetText(wxString::FromUTF8(req.body.c_str(), req.body.size()));
             if (ctVal.find("application/json") != std::string::npos)
                 m_rawTypeChoice->SetSelection(0);
             else if (ctVal.find("text/html") != std::string::npos)
@@ -998,6 +1072,7 @@ void RequestTab::LoadRequest(const HttpRequest& req) {
                 m_rawTypeChoice->SetSelection(4);
             else
                 m_rawTypeChoice->SetSelection(1); // Text
+            ApplyBodyLexer(m_rawTypeChoice->GetSelection());
         }
     }
     // apply visual selection (m_loading suppresses dirty marking inside SelectBodyMode)
@@ -1043,7 +1118,9 @@ void RequestTab::HandleResponse(const HttpResponse& res, const HttpRequest& req)
     if (!res.success()) {
         m_statusLabel->SetLabel("Error: " + res.error);
         m_statusLabel->SetForegroundColour(*wxRED);
-        m_responseBody->SetValue(res.error);
+        m_responseBody->SetReadOnly(false);
+        m_responseBody->SetText(res.error);
+        m_responseBody->SetReadOnly(true);
         m_statusLabel->GetParent()->Layout();
         return;
     }
@@ -1063,6 +1140,38 @@ void RequestTab::HandleResponse(const HttpResponse& res, const HttpRequest& req)
     m_statusLabel->SetForegroundColour(color);
     m_statusLabel->GetParent()->Layout();
 
-    m_responseBody->SetValue(wxString::FromUTF8(res.body.c_str(), res.body.size()));
+    auto ct = res.headers.find("Content-Type");
+    std::string ctVal = ct != res.headers.end() ? ct->second : "";
+    ApplyResponseLexer(ctVal);
+    m_responseBody->SetReadOnly(false);
+    m_responseBody->SetText(wxString::FromUTF8(res.body.c_str(), res.body.size()));
+    m_responseBody->SetReadOnly(true);
     SetGridRows(m_responseHeadersGrid, res.headers);
+}
+
+void RequestTab::ApplyBodyLexer(int sel) {
+    // sel: 0=JSON 1=Text 2=HTML 3=XML 4=JavaScript
+    int lexer = wxSTC_LEX_NULL;
+    if (sel == 0)
+        lexer = wxSTC_LEX_JSON;
+    else if (sel == 2)
+        lexer = wxSTC_LEX_HTML;
+    else if (sel == 3)
+        lexer = wxSTC_LEX_XML;
+    else if (sel == 4)
+        lexer = wxSTC_LEX_CPP;
+    ApplyStcLexer(m_bodyInput, lexer);
+}
+
+void RequestTab::ApplyResponseLexer(const std::string& ct) {
+    int lexer = wxSTC_LEX_NULL;
+    if (ct.find("json") != std::string::npos)
+        lexer = wxSTC_LEX_JSON;
+    else if (ct.find("html") != std::string::npos)
+        lexer = wxSTC_LEX_HTML;
+    else if (ct.find("xml") != std::string::npos)
+        lexer = wxSTC_LEX_XML;
+    else if (ct.find("javascript") != std::string::npos)
+        lexer = wxSTC_LEX_CPP;
+    ApplyStcLexer(m_responseBody, lexer);
 }

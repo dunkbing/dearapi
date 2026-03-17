@@ -10,6 +10,7 @@
 #include <wx/simplebook.h>
 #include <wx/splitter.h>
 #include <wx/stattext.h>
+#include <wx/stc/stc.h>
 #include <wx/wx.h>
 
 #include "app_gate.hpp"
@@ -73,7 +74,7 @@ private:
     wxSimplebook* m_bodyBook{};
     wxPanel* m_rawExtraPanel{};
     wxChoice* m_rawTypeChoice{};
-    wxTextCtrl* m_bodyInput{}; // raw text body
+    wxStyledTextCtrl* m_bodyInput{}; // raw body (STC)
     wxGrid* m_formDataGrid{};
     wxTextCtrl* m_formDataRaw{};
     wxSimplebook* m_formDataBook{};
@@ -82,7 +83,7 @@ private:
     wxSimplebook* m_urlEncodedBook{};
     wxTextCtrl* m_binaryPath{};
     wxStaticText* m_statusLabel{};
-    wxTextCtrl* m_responseBody{};
+    wxStyledTextCtrl* m_responseBody{};
     wxGrid* m_responseHeadersGrid{};
 
     void BuildUI();
@@ -91,6 +92,8 @@ private:
     void SyncUrlFromParams();
     void MarkDirty();
     void UpdateTabTitle();
+    void ApplyBodyLexer(int sel);
+    void ApplyResponseLexer(const std::string& ct);
 
     wxGrid* MakeKeyValueGrid(wxWindow* parent, bool editable);
     wxGrid* MakeFormDataGrid(wxWindow* parent);

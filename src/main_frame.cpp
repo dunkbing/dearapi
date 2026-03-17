@@ -225,7 +225,7 @@ void MainFrame::UpdateRightView() {
 }
 
 RequestTab* MainFrame::NewTab(const std::string& name) {
-    m_rightBook->SetSelection(1); // show notebook before adding page
+    m_rightBook->SetSelection(1);
     auto* tab = new RequestTab(m_notebook, name, m_gate);
 
     tab->onSave = [this, tab](const HttpRequest& req, const std::string& suggested) {
