@@ -1,6 +1,7 @@
 #include "main_frame.hpp"
 #include "importer.hpp"
 #include <format>
+#include <set>
 #include <wx/artprov.h>
 #include <wx/aui/tabart.h>
 #include <wx/filedlg.h>
@@ -9,6 +10,17 @@
 #ifdef __WXGTK__
 #include <gtk/gtk.h>
 #endif
+
+// walks every item in a wxTreeCtrl subtree, calling fn(item) on each node
+template <typename F> static void walkTree(wxTreeCtrl* tree, wxTreeItemId item, F&& fn) {
+    if (!item.IsOk())
+        return;
+    fn(item);
+    wxTreeItemIdValue cookie;
+    for (auto ch = tree->GetFirstChild(item, cookie); ch.IsOk();
+         ch = tree->GetNextChild(item, cookie))
+        walkTree(tree, ch, std::forward<F>(fn));
+}
 
 // ── custom tab art: bold title when dirty
 // ─────────────────────────────────────
@@ -375,6 +387,18 @@ void MainFrame::OnNewTab(wxCommandEvent&) {
 // ──────────────────────────────────────────────────────────
 
 void MainFrame::RebuildTree() {
+    using Key = std::pair<CollectionItemData::Type, int64_t>;
+    std::set<Key> expanded;
+    bool isFirstBuild = !m_treeRoot.IsOk();
+
+    if (!isFirstBuild) {
+        walkTree(m_tree, m_treeRoot, [&](wxTreeItemId item) {
+            auto* d = dynamic_cast<CollectionItemData*>(m_tree->GetItemData(item));
+            if (d && m_tree->IsExpanded(item))
+                expanded.insert({d->type, d->id});
+        });
+    }
+
     m_tree->DeleteAllItems();
     m_treeRoot = m_tree->AddRoot("root");
 
@@ -386,7 +410,16 @@ void MainFrame::RebuildTree() {
                             new CollectionItemData(CollectionItemData::Type::Collection, coll.id));
         BuildTreeBranch(item, coll.id, 0);
     }
-    m_tree->ExpandAll();
+
+    if (isFirstBuild) {
+        m_tree->ExpandAll();
+    } else {
+        walkTree(m_tree, m_treeRoot, [&](wxTreeItemId item) {
+            auto* d = dynamic_cast<CollectionItemData*>(m_tree->GetItemData(item));
+            if (d && expanded.contains({d->type, d->id}))
+                m_tree->Expand(item);
+        });
+    }
 }
 
 void MainFrame::BuildTreeBranch(wxTreeItemId parent, int64_t collectionId, int64_t parentFolderId) {
