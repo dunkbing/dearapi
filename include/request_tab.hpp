@@ -7,7 +7,9 @@
 #include <wx/aui/auibook.h>
 #include <wx/grid.h>
 #include <wx/notebook.h>
+#include <wx/simplebook.h>
 #include <wx/splitter.h>
+#include <wx/stattext.h>
 #include <wx/wx.h>
 
 #include "app_gate.hpp"
@@ -60,20 +62,44 @@ private:
     wxTextCtrl* m_urlInput{};
     wxButton* m_sendButton{};
     wxGrid* m_paramsGrid{};
+    wxTextCtrl* m_paramsRaw{};
+    wxSimplebook* m_paramsBook{};
     wxGrid* m_headersGrid{};
-    wxChoice* m_bodyTypeChoice{};
-    wxTextCtrl* m_bodyInput{};
+    wxTextCtrl* m_headersRaw{};
+    wxSimplebook* m_headersBook{};
+    // body
+    int m_bodyMode{0}; // 0=none 1=form-data 2=urlencoded 3=raw 4=binary
+    wxStaticText* m_bodyTypeLabels[5]{};
+    wxSimplebook* m_bodyBook{};
+    wxPanel* m_rawExtraPanel{};
+    wxChoice* m_rawTypeChoice{};
+    wxTextCtrl* m_bodyInput{}; // raw text body
+    wxGrid* m_formDataGrid{};
+    wxTextCtrl* m_formDataRaw{};
+    wxSimplebook* m_formDataBook{};
+    wxGrid* m_urlEncodedGrid{};
+    wxTextCtrl* m_urlEncodedRaw{};
+    wxSimplebook* m_urlEncodedBook{};
+    wxTextCtrl* m_binaryPath{};
     wxStaticText* m_statusLabel{};
     wxTextCtrl* m_responseBody{};
     wxGrid* m_responseHeadersGrid{};
 
     void BuildUI();
     void SetMethod(const std::string& method);
+    void SelectBodyMode(int mode);
+    void SyncUrlFromParams();
     void MarkDirty();
     void UpdateTabTitle();
 
     wxGrid* MakeKeyValueGrid(wxWindow* parent, bool editable);
+    wxGrid* MakeFormDataGrid(wxWindow* parent);
+    wxPanel* MakeKVPanel(wxWindow* parent, const wxString& title, wxGrid*& gridOut,
+                         wxTextCtrl*& rawOut, wxSimplebook*& bookOut);
     void SetGridRows(wxGrid* grid, const std::map<std::string, std::string>& data);
+    static std::map<std::string, std::string> GridToMap(wxGrid* grid);
+    static std::map<std::string, std::string> ParseRawKV(const wxString& text);
+    static wxString MapToRaw(const std::map<std::string, std::string>& m);
     HttpRequest BuildCurrentRequest() const;
 
     void OnSend(wxCommandEvent&);

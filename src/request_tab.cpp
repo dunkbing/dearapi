@@ -3,6 +3,7 @@
 #include "curl_parser.hpp"
 #include <algorithm>
 #include <format>
+#include <fstream>
 #include <thread>
 
 // ── method colours
@@ -35,39 +36,172 @@ static wxColour MethodTextColor(const std::string& method) {
 // ── grid helpers
 // ──────────────────────────────────────────────────────────────
 
+static std::string StripQueryString(const std::string& url) {
+    auto q = url.find('?');
+    return (q != std::string::npos) ? url.substr(0, q) : url;
+}
+
+static std::string BuildQueryString(const std::map<std::string, std::string>& params) {
+    std::string qs;
+    for (auto& [k, v] : params) {
+        qs += (qs.empty() ? "?" : "&");
+        qs += k + "=" + v;
+    }
+    return qs;
+}
+
+static void BindColLabelPaint(wxGrid* grid) {
+    auto* colWin = grid->GetGridColLabelWindow();
+    colWin->Bind(wxEVT_PAINT, [grid, colWin](wxPaintEvent&) {
+        wxPaintDC dc(colWin);
+        wxSize sz = colWin->GetClientSize();
+        dc.SetBrush(wxBrush(grid->GetLabelBackgroundColour()));
+        dc.SetPen(*wxTRANSPARENT_PEN);
+        dc.DrawRectangle(wxRect(sz));
+        dc.SetPen(wxPen(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNSHADOW)));
+        dc.DrawLine(0, sz.y - 1, sz.x, sz.y - 1);
+        dc.SetFont(grid->GetLabelFont());
+        dc.SetTextForeground(grid->GetLabelTextColour());
+        int x = 0;
+        for (int col = 0; col < grid->GetNumberCols(); col++) {
+            int w = grid->GetColSize(col);
+            wxString label = grid->GetColLabelValue(col);
+            if (!label.empty())
+                dc.DrawLabel(label, wxRect(x + 3, 0, w - 6, sz.y - 1),
+                             wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+            x += w;
+        }
+    });
+}
+
+// renders grey placeholder text when a cell is empty
+class PlaceholderRenderer : public wxGridCellStringRenderer {
+public:
+    explicit PlaceholderRenderer(const wxString& hint) : m_hint(hint) {}
+    void Draw(wxGrid& grid, wxGridCellAttr& attr, wxDC& dc, const wxRect& rect, int row, int col,
+              bool isSelected) override {
+        if (grid.GetCellValue(row, col).empty() && !isSelected) {
+            dc.SetBrush(wxBrush(attr.GetBackgroundColour()));
+            dc.SetPen(*wxTRANSPARENT_PEN);
+            dc.DrawRectangle(rect);
+            dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+            dc.SetFont(attr.GetFont());
+            wxRect r = rect;
+            r.Deflate(3, 0);
+            dc.DrawLabel(m_hint, r, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+        } else {
+            wxGridCellStringRenderer::Draw(grid, attr, dc, rect, row, col, isSelected);
+        }
+    }
+    wxGridCellRenderer* Clone() const override {
+        return new PlaceholderRenderer(m_hint);
+    }
+
+private:
+    wxString m_hint;
+};
+
 wxGrid* RequestTab::MakeKeyValueGrid(wxWindow* parent, bool editable) {
     auto* grid = new wxGrid(parent, wxID_ANY);
-    grid->CreateGrid(1, 2);
-    grid->SetColLabelValue(0, "Key");
-    grid->SetColLabelValue(1, "Value");
     grid->SetRowLabelSize(0);
-    grid->SetColLabelSize(22);
-    grid->SetDefaultRowSize(24);
-    grid->SetColSize(0, 200);
+    grid->SetDefaultRowSize(26);
     grid->DisableDragColSize();
 
-    if (!editable)
-        grid->EnableEditing(false);
-
-    grid->Bind(wxEVT_SIZE, [grid](wxSizeEvent& evt) {
-        int w = evt.GetSize().GetWidth() - 200 - 2;
-        if (w > 0)
-            grid->SetColSize(1, w);
-        evt.Skip();
-    });
-
     if (editable) {
+        // 4 columns: [enabled] Key  Value  Description
+        grid->CreateGrid(1, 4);
+        grid->SetColLabelSize(24);
+        grid->SetColLabelValue(0, "");
+        grid->SetColLabelValue(1, "Key");
+        grid->SetColLabelValue(2, "Value");
+        grid->SetColLabelValue(3, "Description");
+        grid->SetColSize(0, 28);
+        grid->SetColSize(1, 180);
+        grid->SetColSize(3, 150);
+
+        // checkbox column
+        auto* boolAttr = new wxGridCellAttr();
+        boolAttr->SetRenderer(new wxGridCellBoolRenderer());
+        boolAttr->SetEditor(new wxGridCellBoolEditor());
+        boolAttr->SetAlignment(wxALIGN_CENTRE, wxALIGN_CENTRE);
+        grid->SetColAttr(0, boolAttr);
+
+        // placeholder renderers
+        auto* keyAttr = new wxGridCellAttr();
+        keyAttr->SetRenderer(new PlaceholderRenderer("Key"));
+        grid->SetColAttr(1, keyAttr);
+        auto* valAttr = new wxGridCellAttr();
+        valAttr->SetRenderer(new PlaceholderRenderer("Value"));
+        grid->SetColAttr(2, valAttr);
+        auto* descAttr = new wxGridCellAttr();
+        descAttr->SetRenderer(new PlaceholderRenderer("Description"));
+        grid->SetColAttr(3, descAttr);
+
+        // initial row: enabled
+        grid->SetCellValue(0, 0, "1");
+
+        grid->SetSelectionMode(wxGrid::wxGridSelectCells);
+        grid->UseNativeColHeader(false);
+
+        BindColLabelPaint(grid);
+
+        grid->Bind(wxEVT_GRID_TABBING, [this, grid](wxGridEvent& evt) {
+            int lastCol = grid->GetNumberCols() - 1;
+            int row = evt.GetRow(), col = evt.GetCol();
+            if (!evt.ShiftDown() && col == lastCol) {
+                // Tab from last col → col 1 of next row
+                evt.Veto();
+                grid->DisableCellEditControl();
+                int nextRow = row + 1;
+                if (nextRow >= grid->GetNumberRows()) {
+                    grid->AppendRows(1);
+                    grid->SetCellValue(nextRow, 0, "1");
+                }
+                grid->SetGridCursor(nextRow, 1);
+                grid->MakeCellVisible(nextRow, 1);
+                grid->EnableCellEditControl();
+            } else if (evt.ShiftDown() && col <= 1 && row > 0) {
+                // Shift+Tab from first editable col → last col of previous row
+                evt.Veto();
+                grid->DisableCellEditControl();
+                grid->SetGridCursor(row - 1, lastCol);
+                grid->MakeCellVisible(row - 1, lastCol);
+                grid->EnableCellEditControl();
+            } else {
+                evt.Skip();
+            }
+        });
+
+        grid->Bind(wxEVT_SIZE, [grid](wxSizeEvent& evt) {
+            int w = evt.GetSize().GetWidth() - 28 - 180 - 150 - 4;
+            if (w > 40)
+                grid->SetColSize(2, w);
+            evt.Skip();
+        });
         grid->Bind(wxEVT_GRID_CELL_CHANGED, [this, grid](wxGridEvent& evt) {
             int last = grid->GetNumberRows() - 1;
-            if (evt.GetRow() == last) {
-                for (int c = 0; c < grid->GetNumberCols(); c++) {
-                    if (!grid->GetCellValue(last, c).IsEmpty()) {
-                        grid->AppendRows(1);
-                        break;
-                    }
+            int col = evt.GetCol();
+            if (evt.GetRow() == last && (col == 1 || col == 2)) {
+                if (!grid->GetCellValue(last, 1).IsEmpty() ||
+                    !grid->GetCellValue(last, 2).IsEmpty()) {
+                    grid->AppendRows(1);
+                    grid->SetCellValue(grid->GetNumberRows() - 1, 0, "1");
                 }
             }
             MarkDirty();
+            evt.Skip();
+        });
+    } else {
+        // 2 columns: Key  Value (read-only response grid)
+        grid->CreateGrid(1, 2);
+        grid->SetColLabelSize(0);
+        grid->SetColSize(0, 200);
+        grid->EnableEditing(false);
+
+        grid->Bind(wxEVT_SIZE, [grid](wxSizeEvent& evt) {
+            int w = evt.GetSize().GetWidth() - 200 - 2;
+            if (w > 0)
+                grid->SetColSize(1, w);
             evt.Skip();
         });
     }
@@ -76,18 +210,266 @@ wxGrid* RequestTab::MakeKeyValueGrid(wxWindow* parent, bool editable) {
 }
 
 void RequestTab::SetGridRows(wxGrid* grid, const std::map<std::string, std::string>& data) {
+    bool has5 = grid->GetNumberCols() >= 5; // form-data
+    bool has4 = !has5 && grid->GetNumberCols() >= 4;
+    int keyCol = (has5 || has4) ? 1 : 0;
+    int valCol = has5 ? 3 : (has4 ? 2 : 1);
+    int needed = static_cast<int>(data.size()) + ((has5 || has4) ? 1 : 0);
+
     int current = grid->GetNumberRows();
-    int needed = static_cast<int>(data.size());
     if (current < needed)
         grid->AppendRows(needed - current);
-    else if (current > needed)
+    else if (current > needed && needed > 0)
         grid->DeleteRows(0, current - needed);
+
     int row = 0;
     for (auto& [k, v] : data) {
-        grid->SetCellValue(row, 0, k);
-        grid->SetCellValue(row, 1, v);
+        if (has5 || has4)
+            grid->SetCellValue(row, 0, "1");
+        if (has5)
+            grid->SetCellValue(row, 2, "Text");
+        grid->SetCellValue(row, keyCol, k);
+        grid->SetCellValue(row, valCol, v);
         row++;
     }
+    if (has5 || has4) { // trailing empty row
+        grid->SetCellValue(row, 0, "1");
+        if (has5)
+            grid->SetCellValue(row, 2, "Text");
+        grid->SetCellValue(row, keyCol, "");
+        grid->SetCellValue(row, valCol, "");
+    }
+}
+
+std::map<std::string, std::string> RequestTab::GridToMap(wxGrid* grid) {
+    std::map<std::string, std::string> m;
+    bool has5 = grid->GetNumberCols() >= 5; // form-data
+    bool has4 = !has5 && grid->GetNumberCols() >= 4;
+    int keyCol = (has5 || has4) ? 1 : 0;
+    int valCol = has5 ? 3 : (has4 ? 2 : 1);
+    for (int r = 0; r < grid->GetNumberRows(); r++) {
+        if ((has5 || has4) && grid->GetCellValue(r, 0) != "1")
+            continue; // disabled row
+        if (has5 && grid->GetCellValue(r, 2) == "File")
+            continue; // skip file rows in bulk edit
+        auto key = grid->GetCellValue(r, keyCol).ToStdString();
+        auto val = grid->GetCellValue(r, valCol).ToStdString();
+        if (!key.empty())
+            m[key] = val;
+    }
+    return m;
+}
+
+std::map<std::string, std::string> RequestTab::ParseRawKV(const wxString& text) {
+    std::map<std::string, std::string> m;
+    for (auto& line : wxSplit(text, '\n')) {
+        wxString t = line.Trim(true).Trim(false);
+        if (t.empty() || t.StartsWith("//"))
+            continue;
+        // prefer ':' separator (HTTP style), fall back to '='
+        auto pos = t.find(':');
+        if (pos == wxString::npos)
+            pos = t.find('=');
+        if (pos == wxString::npos)
+            continue;
+        m[t.Left(pos).Trim(true).ToStdString()] = t.Mid(pos + 1).Trim(false).ToStdString();
+    }
+    return m;
+}
+
+wxString RequestTab::MapToRaw(const std::map<std::string, std::string>& m) {
+    wxString out;
+    for (auto& [k, v] : m)
+        out += wxString::FromUTF8(k) + ": " + wxString::FromUTF8(v) + "\n";
+    return out;
+}
+
+wxPanel* RequestTab::MakeKVPanel(wxWindow* parent, const wxString& title, wxGrid*& gridOut,
+                                 wxTextCtrl*& rawOut, wxSimplebook*& bookOut) {
+    auto* panel = new wxPanel(parent);
+    auto* sizer = new wxBoxSizer(wxVERTICAL);
+
+    // header: title left, toggle button right
+    auto* bar = new wxPanel(panel);
+    auto* barSizer = new wxBoxSizer(wxHORIZONTAL);
+    auto* titleLabel = new wxStaticText(bar, wxID_ANY, title);
+    titleLabel->SetFont(titleLabel->GetFont().Bold());
+    auto* toggleBtn = new wxButton(bar, wxID_ANY, "Bulk Edit");
+    barSizer->Add(titleLabel, 0, wxALIGN_CENTER_VERTICAL);
+    barSizer->AddStretchSpacer();
+    barSizer->Add(toggleBtn, 0, wxALIGN_CENTER_VERTICAL);
+    bar->SetSizer(barSizer);
+
+    // paged content
+    auto* book = new wxSimplebook(panel);
+    gridOut = MakeKeyValueGrid(book, true);
+    rawOut = new wxTextCtrl(book, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
+                            wxTE_MULTILINE | wxTE_DONTWRAP | wxBORDER_NONE);
+    rawOut->SetFont(wxFont(wxFontInfo(10).Family(wxFONTFAMILY_TELETYPE)));
+    book->AddPage(gridOut, "");
+    book->AddPage(rawOut, "");
+    bookOut = book;
+
+    sizer->Add(bar, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
+    sizer->Add(book, 1, wxEXPAND | wxTOP, 4);
+    panel->SetSizer(sizer);
+
+    // single toggle button switches between KV and Bulk Edit modes
+    toggleBtn->Bind(wxEVT_BUTTON, [this, toggleBtn, gridOut, rawOut, book](wxCommandEvent&) {
+        if (book->GetSelection() == 0) {
+            rawOut->SetValue(MapToRaw(GridToMap(gridOut)));
+            book->SetSelection(1);
+            toggleBtn->SetLabel("Key-Value Edit");
+        } else {
+            SetGridRows(gridOut, ParseRawKV(rawOut->GetValue()));
+            book->SetSelection(0);
+            toggleBtn->SetLabel("Bulk Edit");
+        }
+        toggleBtn->InvalidateBestSize();
+        toggleBtn->GetParent()->Layout();
+    });
+    rawOut->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { MarkDirty(); });
+
+    return panel;
+}
+
+wxGrid* RequestTab::MakeFormDataGrid(wxWindow* parent) {
+    auto* grid = new wxGrid(parent, wxID_ANY);
+    grid->SetRowLabelSize(0);
+    grid->SetDefaultRowSize(26);
+    grid->DisableDragColSize();
+
+    // 5 columns: [enabled | Key | Type | Value | Description]
+    grid->CreateGrid(1, 5);
+    grid->SetColLabelSize(24);
+    grid->SetColLabelValue(0, "");
+    grid->SetColLabelValue(1, "Key");
+    grid->SetColLabelValue(2, "");
+    grid->SetColLabelValue(3, "Value");
+    grid->SetColLabelValue(4, "Description");
+    grid->SetColSize(0, 28);
+    grid->SetColSize(1, 150);
+    grid->SetColSize(2, 70);
+    grid->SetColSize(4, 120);
+
+    auto* boolAttr = new wxGridCellAttr();
+    boolAttr->SetRenderer(new wxGridCellBoolRenderer());
+    boolAttr->SetEditor(new wxGridCellBoolEditor());
+    boolAttr->SetAlignment(wxALIGN_CENTRE, wxALIGN_CENTRE);
+    grid->SetColAttr(0, boolAttr);
+
+    auto* keyAttr = new wxGridCellAttr();
+    keyAttr->SetRenderer(new PlaceholderRenderer("Key"));
+    grid->SetColAttr(1, keyAttr);
+
+    wxArrayString types;
+    types.Add("Text");
+    types.Add("File");
+    auto* typeAttr = new wxGridCellAttr();
+    typeAttr->SetEditor(new wxGridCellChoiceEditor(types));
+    grid->SetColAttr(2, typeAttr);
+
+    auto* valAttr = new wxGridCellAttr();
+    valAttr->SetRenderer(new PlaceholderRenderer("Value"));
+    grid->SetColAttr(3, valAttr);
+
+    auto* descAttr = new wxGridCellAttr();
+    descAttr->SetRenderer(new PlaceholderRenderer("Description"));
+    grid->SetColAttr(4, descAttr);
+
+    grid->SetCellValue(0, 0, "1");
+    grid->SetCellValue(0, 2, "Text");
+
+    grid->SetSelectionMode(wxGrid::wxGridSelectCells);
+    grid->UseNativeColHeader(false);
+
+    BindColLabelPaint(grid);
+
+    // open file dialog when clicking value cell of a File-type row
+    grid->Bind(wxEVT_GRID_CELL_LEFT_CLICK, [this, grid](wxGridEvent& evt) {
+        if (evt.GetCol() == 3 && grid->GetCellValue(evt.GetRow(), 2) == "File") {
+            grid->DisableCellEditControl();
+            wxFileDialog dlg(this, "Select file", "", "", "*.*", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+            if (dlg.ShowModal() == wxID_OK) {
+                grid->SetCellValue(evt.GetRow(), 3, dlg.GetPath());
+                MarkDirty();
+            }
+            return; // don't start normal editor
+        }
+        evt.Skip();
+    });
+
+    grid->Bind(wxEVT_GRID_TABBING, [this, grid](wxGridEvent& evt) {
+        int lastCol = grid->GetNumberCols() - 1;
+        int row = evt.GetRow(), col = evt.GetCol();
+        if (!evt.ShiftDown() && col == lastCol) {
+            evt.Veto();
+            grid->DisableCellEditControl();
+            int nextRow = row + 1;
+            if (nextRow >= grid->GetNumberRows()) {
+                grid->AppendRows(1);
+                grid->SetCellValue(nextRow, 0, "1");
+                grid->SetCellValue(nextRow, 2, "Text");
+            }
+            grid->SetGridCursor(nextRow, 1);
+            grid->MakeCellVisible(nextRow, 1);
+            grid->EnableCellEditControl();
+        } else if (evt.ShiftDown() && col <= 1 && row > 0) {
+            evt.Veto();
+            grid->DisableCellEditControl();
+            grid->SetGridCursor(row - 1, lastCol);
+            grid->MakeCellVisible(row - 1, lastCol);
+            grid->EnableCellEditControl();
+        } else {
+            evt.Skip();
+        }
+    });
+
+    grid->Bind(wxEVT_SIZE, [grid](wxSizeEvent& evt) {
+        int w = evt.GetSize().GetWidth() - 28 - 150 - 70 - 120 - 4;
+        if (w > 40)
+            grid->SetColSize(3, w);
+        evt.Skip();
+    });
+
+    grid->Bind(wxEVT_GRID_CELL_CHANGED, [this, grid](wxGridEvent& evt) {
+        int last = grid->GetNumberRows() - 1;
+        int col = evt.GetCol();
+        if (evt.GetRow() == last && (col == 1 || col == 3)) {
+            if (!grid->GetCellValue(last, 1).IsEmpty() || !grid->GetCellValue(last, 3).IsEmpty()) {
+                grid->AppendRows(1);
+                grid->SetCellValue(last + 1, 0, "1");
+                grid->SetCellValue(last + 1, 2, "Text");
+            }
+        }
+        MarkDirty();
+        evt.Skip();
+    });
+
+    return grid;
+}
+
+void RequestTab::SelectBodyMode(int mode) {
+    m_bodyMode = mode;
+    wxColour accent(97, 175, 239);
+    wxColour normal = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+    for (int i = 0; i < 5; i++) {
+        m_bodyTypeLabels[i]->SetForegroundColour(i == mode ? accent : normal);
+        m_bodyTypeLabels[i]->Refresh();
+    }
+    m_bodyBook->SetSelection(mode);
+    m_rawExtraPanel->Show(mode == 3);
+    m_rawExtraPanel->GetParent()->Layout();
+    if (!m_loading)
+        SetDirty(true);
+}
+
+void RequestTab::SyncUrlFromParams() {
+    std::string base = StripQueryString(m_urlInput->GetValue().ToStdString());
+    auto params = m_paramsBook->GetSelection() == 0 ? GridToMap(m_paramsGrid)
+                                                    : ParseRawKV(m_paramsRaw->GetValue());
+    // ChangeValue doesn't fire wxEVT_TEXT so no curl detection or re-dirty
+    m_urlInput->ChangeValue(base + BuildQueryString(params));
 }
 
 // ── constructor
@@ -178,28 +560,192 @@ void RequestTab::BuildUI() {
     auto* reqPanel = new wxPanel(splitter);
     auto* reqNotebook = new wxNotebook(reqPanel, wxID_ANY);
 
-    m_paramsGrid = MakeKeyValueGrid(reqNotebook, true);
-    m_headersGrid = MakeKeyValueGrid(reqNotebook, true);
-    reqNotebook->AddPage(m_paramsGrid, "Params");
-    reqNotebook->AddPage(m_headersGrid, "Headers");
+    reqNotebook->AddPage(
+        MakeKVPanel(reqNotebook, "Query Params", m_paramsGrid, m_paramsRaw, m_paramsBook),
+        "Params");
+
+    // keep URL input in sync with params edits
+    m_paramsGrid->Bind(wxEVT_GRID_CELL_CHANGED, [this](wxGridEvent& evt) {
+        SyncUrlFromParams();
+        evt.Skip();
+    });
+    m_paramsRaw->Bind(wxEVT_TEXT, [this](wxCommandEvent& evt) {
+        SyncUrlFromParams();
+        evt.Skip();
+    });
+
+    reqNotebook->AddPage(
+        MakeKVPanel(reqNotebook, "Headers", m_headersGrid, m_headersRaw, m_headersBook), "Headers");
 
     auto* bodyPanel = new wxPanel(reqNotebook);
     auto* bodySizer = new wxBoxSizer(wxVERTICAL);
 
-    wxArrayString bodyTypes;
-    for (auto& t : {"none", "raw (JSON)", "raw (text)", "form-urlencoded"})
-        bodyTypes.Add(t);
+    // body type selector bar (plain clickable labels — no focus rectangle)
+    auto* radioBar = new wxPanel(bodyPanel);
+    auto* radioSizer = new wxBoxSizer(wxHORIZONTAL);
+    const char* bodyLabels[] = {"none", "form-data", "x-www-form-urlencoded", "raw", "binary"};
+    for (int i = 0; i < 5; i++) {
+        m_bodyTypeLabels[i] = new wxStaticText(radioBar, wxID_ANY, bodyLabels[i]);
+        m_bodyTypeLabels[i]->SetCursor(wxCursor(wxCURSOR_HAND));
+        radioSizer->Add(m_bodyTypeLabels[i], 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 14);
+        m_bodyTypeLabels[i]->Bind(wxEVT_LEFT_DOWN, [this, i](wxMouseEvent&) { SelectBodyMode(i); });
+    }
+    // initial selection: none
+    m_bodyTypeLabels[0]->SetForegroundColour(wxColour(97, 175, 239));
+    radioSizer->AddStretchSpacer();
 
-    m_bodyTypeChoice =
-        new wxChoice(bodyPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, bodyTypes);
-    m_bodyTypeChoice->SetSelection(0);
+    // raw extras: type dropdown + beautify (hidden unless "raw" selected)
+    m_rawExtraPanel = new wxPanel(radioBar);
+    auto* rawExtraSizer = new wxBoxSizer(wxHORIZONTAL);
+    wxArrayString rawTypes;
+    for (auto& t : {"JSON", "Text", "HTML", "XML", "JavaScript"})
+        rawTypes.Add(t);
+    m_rawTypeChoice =
+        new wxChoice(m_rawExtraPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, rawTypes);
+    m_rawTypeChoice->SetSelection(0);
+    m_rawTypeChoice->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { MarkDirty(); });
+    auto* beautifyBtn = new wxButton(m_rawExtraPanel, wxID_ANY, "Beautify");
+    beautifyBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        // simple JSON pretty-printer
+        std::string s = m_bodyInput->GetValue().ToStdString();
+        std::string out;
+        out.reserve(s.size() * 2); // formatted output is typically larger than input
+        int indent = 0;
+        bool inStr = false;
+        for (size_t i = 0; i < s.size(); i++) {
+            char c = s[i];
+            if (inStr) {
+                out += c;
+                if (c == '\\' && i + 1 < s.size())
+                    out += s[++i];
+                else if (c == '"')
+                    inStr = false;
+            } else if (c == '"') {
+                inStr = true;
+                out += c;
+            } else if (c == '{' || c == '[') {
+                out += c;
+                out += '\n';
+                indent += 2;
+                out += std::string(indent, ' ');
+            } else if (c == '}' || c == ']') {
+                out += '\n';
+                indent = std::max(0, indent - 2);
+                out += std::string(indent, ' ');
+                out += c;
+            } else if (c == ',') {
+                out += c;
+                out += '\n';
+                out += std::string(indent, ' ');
+            } else if (c == ':') {
+                out += ": ";
+            } else if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                out += c;
+            }
+        }
+        if (!out.empty())
+            m_bodyInput->SetValue(wxString::FromUTF8(out));
+    });
+    rawExtraSizer->Add(m_rawTypeChoice, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    rawExtraSizer->Add(beautifyBtn, 0, wxALIGN_CENTER_VERTICAL);
+    m_rawExtraPanel->SetSizer(rawExtraSizer);
+    m_rawExtraPanel->Hide();
+    radioSizer->Add(m_rawExtraPanel, 0, wxALIGN_CENTER_VERTICAL);
+    radioBar->SetSizer(radioSizer);
 
-    m_bodyInput = new wxTextCtrl(bodyPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
-                                 wxTE_MULTILINE | wxTE_DONTWRAP | wxHSCROLL);
+    // body book — one page per mode
+    m_bodyBook = new wxSimplebook(bodyPanel);
+
+    // page 0: none
+    {
+        auto* p = new wxPanel(m_bodyBook);
+        auto* s = new wxBoxSizer(wxVERTICAL);
+        s->AddStretchSpacer();
+        s->Add(new wxStaticText(p, wxID_ANY, "This request does not have a body"), 0,
+               wxALIGN_CENTER_HORIZONTAL);
+        s->AddStretchSpacer();
+        p->SetSizer(s);
+        m_bodyBook->AddPage(p, "");
+    }
+    // page 1: form-data (5-column grid with Text/File type per row)
+    {
+        auto* panel = new wxPanel(m_bodyBook);
+        auto* sizer = new wxBoxSizer(wxVERTICAL);
+        auto* bar2 = new wxPanel(panel);
+        auto* bar2Sizer = new wxBoxSizer(wxHORIZONTAL);
+        auto* titleLabel = new wxStaticText(bar2, wxID_ANY, "Form Data");
+        titleLabel->SetFont(titleLabel->GetFont().Bold());
+        auto* toggleBtn = new wxButton(bar2, wxID_ANY, "Bulk Edit");
+        bar2Sizer->Add(titleLabel, 0, wxALIGN_CENTER_VERTICAL);
+        bar2Sizer->AddStretchSpacer();
+        bar2Sizer->Add(toggleBtn, 0, wxALIGN_CENTER_VERTICAL);
+        bar2->SetSizer(bar2Sizer);
+
+        m_formDataGrid = MakeFormDataGrid(panel);
+        m_formDataRaw = new wxTextCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
+                                       wxTE_MULTILINE | wxTE_DONTWRAP | wxBORDER_NONE);
+        m_formDataRaw->SetFont(wxFont(wxFontInfo(10).Family(wxFONTFAMILY_TELETYPE)));
+
+        m_formDataBook = new wxSimplebook(panel);
+        m_formDataBook->AddPage(m_formDataGrid, "");
+        m_formDataBook->AddPage(m_formDataRaw, "");
+
+        sizer->Add(bar2, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
+        sizer->Add(m_formDataBook, 1, wxEXPAND | wxTOP, 4);
+        panel->SetSizer(sizer);
+
+        toggleBtn->Bind(wxEVT_BUTTON, [this, toggleBtn](wxCommandEvent&) {
+            if (m_formDataBook->GetSelection() == 0) {
+                // text-only rows to bulk edit
+                m_formDataRaw->SetValue(MapToRaw(GridToMap(m_formDataGrid)));
+                m_formDataBook->SetSelection(1);
+                toggleBtn->SetLabel("Key-Value Edit");
+            } else {
+                SetGridRows(m_formDataGrid, ParseRawKV(m_formDataRaw->GetValue()));
+                m_formDataBook->SetSelection(0);
+                toggleBtn->SetLabel("Bulk Edit");
+            }
+            toggleBtn->InvalidateBestSize();
+            toggleBtn->GetParent()->Layout();
+        });
+        m_formDataRaw->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { MarkDirty(); });
+
+        m_bodyBook->AddPage(panel, "");
+    }
+    // page 2: x-www-form-urlencoded
+    m_bodyBook->AddPage(
+        MakeKVPanel(m_bodyBook, "URL Encoded", m_urlEncodedGrid, m_urlEncodedRaw, m_urlEncodedBook),
+        "");
+    // page 3: raw
+    m_bodyInput = new wxTextCtrl(m_bodyBook, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
+                                 wxTE_MULTILINE | wxTE_DONTWRAP | wxHSCROLL | wxBORDER_NONE);
     m_bodyInput->SetFont(wxFont(wxFontInfo(10).Family(wxFONTFAMILY_TELETYPE)));
+    m_bodyBook->AddPage(m_bodyInput, "");
+    // page 4: binary
+    {
+        auto* p = new wxPanel(m_bodyBook);
+        auto* s = new wxBoxSizer(wxVERTICAL);
+        auto* row = new wxBoxSizer(wxHORIZONTAL);
+        m_binaryPath = new wxTextCtrl(p, wxID_ANY, "", wxDefaultPosition, wxSize(280, -1));
+        m_binaryPath->SetHint("Select file");
+        auto* browseBtn = new wxButton(p, wxID_ANY, "Browse...");
+        browseBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+            wxFileDialog dlg(this, "Select file", "", "", "*.*", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+            if (dlg.ShowModal() == wxID_OK) {
+                m_binaryPath->SetValue(dlg.GetPath());
+                MarkDirty();
+            }
+        });
+        row->Add(m_binaryPath, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+        row->Add(browseBtn, 0, wxALIGN_CENTER_VERTICAL);
+        s->Add(row, 0, wxALL, 8);
+        s->AddStretchSpacer();
+        p->SetSizer(s);
+        m_bodyBook->AddPage(p, "");
+    }
 
-    bodySizer->Add(m_bodyTypeChoice, 0, wxEXPAND | wxBOTTOM, 4);
-    bodySizer->Add(m_bodyInput, 1, wxEXPAND);
+    bodySizer->Add(radioBar, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
+    bodySizer->Add(m_bodyBook, 1, wxEXPAND | wxTOP, 2);
     bodyPanel->SetSizer(bodySizer);
     reqNotebook->AddPage(bodyPanel, "Body");
 
@@ -281,10 +827,6 @@ void RequestTab::BuildUI() {
         MarkDirty();
         e.Skip();
     });
-    m_bodyTypeChoice->Bind(wxEVT_CHOICE, [this](wxCommandEvent& e) {
-        MarkDirty();
-        e.Skip();
-    });
 
     // ── Ctrl+S / Cmd+S save ───────────────────────────────────────────────────
     Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent& evt) {
@@ -308,40 +850,100 @@ HttpRequest RequestTab::BuildCurrentRequest() const {
     req.method = m_currentMethod;
     req.url = m_urlInput->GetValue().ToStdString();
 
-    std::string qs;
-    for (int r = 0; r < m_paramsGrid->GetNumberRows(); r++) {
-        auto key = m_paramsGrid->GetCellValue(r, 0).ToStdString();
-        auto val = m_paramsGrid->GetCellValue(r, 1).ToStdString();
-        if (!key.empty()) {
-            qs += (qs.empty() ? "?" : "&");
-            qs += key + "=" + val;
+    auto params = m_paramsBook->GetSelection() == 0 ? GridToMap(m_paramsGrid)
+                                                    : ParseRawKV(m_paramsRaw->GetValue());
+    std::string qs = BuildQueryString(params);
+    if (!qs.empty())
+        req.url = StripQueryString(req.url) + qs;
+
+    req.headers = m_headersBook->GetSelection() == 0 ? GridToMap(m_headersGrid)
+                                                     : ParseRawKV(m_headersRaw->GetValue());
+
+    switch (m_bodyMode) {
+    case 1: { // form-data
+        std::string boundary = "----DearAPIBoundary";
+        std::string body;
+        if (m_formDataBook->GetSelection() == 1) {
+            // bulk edit: all text
+            for (auto& [k, v] : ParseRawKV(m_formDataRaw->GetValue())) {
+                body += "--" + boundary + "\r\n";
+                body += "Content-Disposition: form-data; name=\"" + k + "\"\r\n\r\n";
+                body += v + "\r\n";
+            }
+        } else {
+            for (int r = 0; r < m_formDataGrid->GetNumberRows(); r++) {
+                if (m_formDataGrid->GetCellValue(r, 0) != "1")
+                    continue;
+                auto k = m_formDataGrid->GetCellValue(r, 1).ToStdString();
+                if (k.empty())
+                    continue;
+                auto type = m_formDataGrid->GetCellValue(r, 2).ToStdString();
+                auto v = m_formDataGrid->GetCellValue(r, 3).ToStdString();
+                body += "--" + boundary + "\r\n";
+                if (type == "File") {
+                    std::string fname = v.substr(v.find_last_of("/\\") + 1);
+                    body += "Content-Disposition: form-data; name=\"" + k + "\"; filename=\"" +
+                            fname + "\"\r\n";
+                    body += "Content-Type: application/octet-stream\r\n\r\n";
+                    std::ifstream f(v, std::ios::binary);
+                    body += std::string(std::istreambuf_iterator<char>(f), {});
+                    body += "\r\n";
+                } else {
+                    body += "Content-Disposition: form-data; name=\"" + k + "\"\r\n\r\n";
+                    body += v + "\r\n";
+                }
+            }
         }
+        if (!body.empty()) {
+            body += "--" + boundary + "--\r\n";
+            req.body = body;
+            if (req.headers.find("Content-Type") == req.headers.end())
+                req.headers["Content-Type"] = "multipart/form-data; boundary=" + boundary;
+        }
+        break;
     }
-    if (!qs.empty()) {
-        auto q = req.url.find('?');
-        if (q != std::string::npos)
-            req.url = req.url.substr(0, q);
-        req.url += qs;
+    case 2: { // x-www-form-urlencoded
+        auto fields = m_urlEncodedBook->GetSelection() == 0
+                          ? GridToMap(m_urlEncodedGrid)
+                          : ParseRawKV(m_urlEncodedRaw->GetValue());
+        std::string body;
+        for (auto& [k, v] : fields) {
+            if (!body.empty())
+                body += "&";
+            body += k + "=" + v;
+        }
+        req.body = body;
+        if (req.headers.find("Content-Type") == req.headers.end())
+            req.headers["Content-Type"] = "application/x-www-form-urlencoded";
+        break;
     }
-
-    for (int r = 0; r < m_headersGrid->GetNumberRows(); r++) {
-        auto key = m_headersGrid->GetCellValue(r, 0).ToStdString();
-        auto val = m_headersGrid->GetCellValue(r, 1).ToStdString();
-        if (!key.empty())
-            req.headers[key] = val;
-    }
-
-    int bodyType = m_bodyTypeChoice->GetSelection();
-    if (bodyType != 0) {
+    case 3: { // raw
         req.body = m_bodyInput->GetValue().ToStdString();
         if (req.headers.find("Content-Type") == req.headers.end()) {
-            if (bodyType == 1)
+            int sel = m_rawTypeChoice->GetSelection();
+            if (sel == 0)
                 req.headers["Content-Type"] = "application/json";
-            else if (bodyType == 2)
+            else if (sel == 2)
+                req.headers["Content-Type"] = "text/html";
+            else if (sel == 3)
+                req.headers["Content-Type"] = "application/xml";
+            else if (sel == 4)
+                req.headers["Content-Type"] = "application/javascript";
+            else
                 req.headers["Content-Type"] = "text/plain";
-            else if (bodyType == 3)
-                req.headers["Content-Type"] = "application/x-www-form-urlencoded";
         }
+        break;
+    }
+    case 4: { // binary
+        std::string path = m_binaryPath->GetValue().ToStdString();
+        if (!path.empty()) {
+            std::ifstream f(path, std::ios::binary);
+            req.body = std::string(std::istreambuf_iterator<char>(f), {});
+        }
+        break;
+    }
+    default:
+        break; // none
     }
 
     return req;
@@ -354,10 +956,8 @@ HttpRequest RequestTab::GetRequest() const {
 void RequestTab::LoadRequest(const HttpRequest& req) {
     m_loading = true;
 
-    // clear params grid so stale rows don't leak into the next BuildCurrentRequest()
-    if (m_paramsGrid->GetNumberRows() > 0)
-        m_paramsGrid->DeleteRows(0, m_paramsGrid->GetNumberRows());
-    m_paramsGrid->AppendRows(1);
+    SetGridRows(m_paramsGrid, {});
+    m_paramsRaw->SetValue("");
 
     // SetMethod doesn't call MarkDirty while m_loading, but it still
     // recolours the button — use it directly
@@ -369,41 +969,39 @@ void RequestTab::LoadRequest(const HttpRequest& req) {
 
     m_urlInput->SetValue(req.url);
 
-    int needed = static_cast<int>(req.headers.size());
-    int current = m_headersGrid->GetNumberRows();
-    int target = needed + 1;
-    if (current < target)
-        m_headersGrid->AppendRows(target - current);
-    else if (current > target)
-        m_headersGrid->DeleteRows(0, current - target);
+    SetGridRows(m_headersGrid, req.headers);
+    m_headersRaw->SetValue(MapToRaw(req.headers));
 
-    int row = 0;
-    for (auto& [k, v] : req.headers) {
-        m_headersGrid->SetCellValue(row, 0, k);
-        m_headersGrid->SetCellValue(row, 1, v);
-        row++;
-    }
-    m_headersGrid->SetCellValue(row, 0, "");
-    m_headersGrid->SetCellValue(row, 1, "");
-
-    m_bodyInput->SetValue(req.body);
     if (req.body.empty()) {
-        m_bodyTypeChoice->SetSelection(0);
+        m_bodyMode = 0;
     } else {
         auto ct = req.headers.find("Content-Type");
-        if (ct != req.headers.end()) {
-            if (ct->second.find("application/json") != std::string::npos)
-                m_bodyTypeChoice->SetSelection(1);
-            else if (ct->second.find("text/") != std::string::npos)
-                m_bodyTypeChoice->SetSelection(2);
-            else if (ct->second.find("application/x-www-form-urlencoded") != std::string::npos)
-                m_bodyTypeChoice->SetSelection(3);
-            else
-                m_bodyTypeChoice->SetSelection(1);
+        std::string ctVal = ct != req.headers.end() ? ct->second : "";
+        if (ctVal.find("multipart/form-data") != std::string::npos) {
+            m_bodyMode = 1;
+        } else if (ctVal.find("application/x-www-form-urlencoded") != std::string::npos) {
+            m_bodyMode = 2;
+            auto fields = ParseRawKV(wxString::FromUTF8(req.body));
+            SetGridRows(m_urlEncodedGrid, fields);
+            m_urlEncodedRaw->SetValue(MapToRaw(fields));
         } else {
-            m_bodyTypeChoice->SetSelection(1);
+            m_bodyMode = 3; // default to raw for any other content type
+            m_bodyInput->SetValue(wxString::FromUTF8(req.body.c_str(), req.body.size()));
+            if (ctVal.find("application/json") != std::string::npos)
+                m_rawTypeChoice->SetSelection(0);
+            else if (ctVal.find("text/html") != std::string::npos)
+                m_rawTypeChoice->SetSelection(2);
+            else if (ctVal.find("application/xml") != std::string::npos ||
+                     ctVal.find("text/xml") != std::string::npos)
+                m_rawTypeChoice->SetSelection(3);
+            else if (ctVal.find("javascript") != std::string::npos)
+                m_rawTypeChoice->SetSelection(4);
+            else
+                m_rawTypeChoice->SetSelection(1); // Text
         }
     }
+    // apply visual selection (m_loading suppresses dirty marking inside SelectBodyMode)
+    SelectBodyMode(m_bodyMode);
 
     m_loading = false;
     SetDirty(false);
@@ -465,6 +1063,6 @@ void RequestTab::HandleResponse(const HttpResponse& res, const HttpRequest& req)
     m_statusLabel->SetForegroundColour(color);
     m_statusLabel->GetParent()->Layout();
 
-    m_responseBody->SetValue(res.body);
+    m_responseBody->SetValue(wxString::FromUTF8(res.body.c_str(), res.body.size()));
     SetGridRows(m_responseHeadersGrid, res.headers);
 }

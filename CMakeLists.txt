@@ -43,6 +43,7 @@ find_package(GTest CONFIG REQUIRED)
 
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 
@@ -89,6 +90,7 @@ target_link_libraries(dearapi PRIVATE
     OpenSSL::Crypto
     Threads::Threads
     unofficial::sqlite3::sqlite3
+    ZLIB::ZLIB
 )
 
 if(UNIX AND NOT APPLE AND WX_GTK_INCLUDE_DIRS)

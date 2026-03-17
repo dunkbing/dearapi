@@ -9,6 +9,7 @@
 #include <chrono>
 #include <regex>
 #include <stdexcept>
+#include <zlib.h>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -36,6 +37,28 @@ static ParsedUrl parseUrl(const std::string& url) {
         throw std::runtime_error("Invalid URL: " + url);
     }
     return result;
+}
+
+static std::string decompress(const std::string& data, bool gzip) {
+    z_stream zs{};
+    // windowBits: 15+16 = gzip, 15+32 = auto-detect gzip/zlib, 15 = raw deflate
+    if (inflateInit2(&zs, gzip ? 31 : 15) != Z_OK)
+        return data;
+    zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data.data()));
+    zs.avail_in = static_cast<uInt>(data.size());
+    std::string out;
+    char buf[16384];
+    int ret;
+    do {
+        zs.next_out = reinterpret_cast<Bytef*>(buf);
+        zs.avail_out = sizeof(buf);
+        ret = inflate(&zs, Z_NO_FLUSH);
+        if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR)
+            break;
+        out.append(buf, sizeof(buf) - zs.avail_out);
+    } while (ret != Z_STREAM_END && zs.avail_in > 0);
+    inflateEnd(&zs);
+    return out.empty() ? data : out;
 }
 
 static http::verb toVerb(const std::string& method) {
@@ -82,6 +105,14 @@ HttpResponse sendRequest(const HttpRequest& req) {
             response.body = beast_res.body();
             for (auto& field : beast_res)
                 response.headers[std::string(field.name_string())] = std::string(field.value());
+            // decompress body if server sent gzip/deflate encoding
+            auto it = response.headers.find("Content-Encoding");
+            if (it != response.headers.end()) {
+                bool gz = it->second.find("gzip") != std::string::npos;
+                bool df = it->second.find("deflate") != std::string::npos;
+                if (gz || df)
+                    response.body = decompress(response.body, gz);
+            }
         };
 
         if (parsed.scheme == "https") {
