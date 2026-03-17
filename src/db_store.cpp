@@ -377,8 +377,8 @@ bool DBStore::moveRequest(int64_t id, int64_t newFolderId) {
 // ── queries
 // ───────────────────────────────────────────────────────────────────
 
-std::vector<FolderInfo> DBStore::getFolders(int64_t collectionId, int64_t parentId) const {
-    std::vector<FolderInfo> result;
+std::vector<FolderRecord> DBStore::getFolders(int64_t collectionId, int64_t parentId) const {
+    std::vector<FolderRecord> result;
     sqlite3_stmt* s{};
     sqlite3_prepare_v2(m_db,
                        "SELECT id,name,collection_id,parent_id FROM folders"

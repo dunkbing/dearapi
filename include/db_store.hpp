@@ -14,7 +14,7 @@ struct CollectionVariable {
     std::string key, value, description;
 };
 
-struct FolderInfo {
+struct FolderRecord {
     int64_t id;
     std::string name;
     int64_t collectionId;
@@ -57,7 +57,7 @@ public:
     bool moveRequest(int64_t id, int64_t newFolderId);
 
     // queries
-    std::vector<FolderInfo> getFolders(int64_t collectionId, int64_t parentId = 0) const;
+    std::vector<FolderRecord> getFolders(int64_t collectionId, int64_t parentId = 0) const;
     std::vector<SavedRequest> getRequests(int64_t collectionId, int64_t folderId = 0) const;
     SavedRequest getRequest(int64_t id) const;
 

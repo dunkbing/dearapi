@@ -62,7 +62,7 @@ if(UNIX AND NOT APPLE)
     message(STATUS "wxWidgets GTK backend: ${WX_GTK_LIBRARIES}")
 endif()
 
-add_executable(dearapi
+set(DEARAPI_SOURCES
     src/main.cpp
     src/main_frame.cpp
     src/request_tab.cpp
@@ -72,6 +72,12 @@ add_executable(dearapi
     src/collection_tab.cpp
     src/importer.cpp
 )
+
+if(APPLE)
+    list(APPEND DEARAPI_SOURCES src/macos_titlebar.mm)
+endif()
+
+add_executable(dearapi ${DEARAPI_SOURCES})
 
 # ── tests ──────────────────────────────────────────────────────────────────────
 enable_testing()
@@ -96,6 +102,10 @@ target_link_libraries(dearapi PRIVATE
     ZLIB::ZLIB
     nlohmann_json::nlohmann_json
 )
+
+if(APPLE)
+    target_link_libraries(dearapi PRIVATE "-framework AppKit")
+endif()
 
 if(UNIX AND NOT APPLE AND WX_GTK_INCLUDE_DIRS)
     target_include_directories(dearapi PRIVATE ${WX_GTK_INCLUDE_DIRS})

@@ -3,7 +3,7 @@
   "name": "dearapi",
   "version": "0.1.0",
   "description": "Cross-platform HTTP API client",
-  "builtin-baseline": "58950f88544e4637524dbd6a01d0317cf4cb77fc",
+  "builtin-baseline": "f6735d5aa1537081e8d425372ea7e585b0ad65e8",
   "dependencies": [
     "wxwidgets",
     {

@@ -11,6 +11,10 @@
 #include <gtk/gtk.h>
 #endif
 
+#ifdef __WXOSX__
+#include "macos_titlebar.hpp"
+#endif
+
 // walks every item in a wxTreeCtrl subtree, calling fn(item) on each node
 template <typename F> static void walkTree(wxTreeCtrl* tree, wxTreeItemId item, F&& fn) {
     if (!item.IsOk())
@@ -245,6 +249,10 @@ void MainFrame::SetupTitlebar() {
 #if !GTK_CHECK_VERSION(4, 0, 0)
     gtk_widget_show_all(header);
 #endif
+#endif
+
+#ifdef __WXOSX__
+    SetupMacOSTitlebar(this);
 #endif
 }
 
