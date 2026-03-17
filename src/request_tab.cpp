@@ -1085,12 +1085,34 @@ void RequestTab::LoadRequest(const HttpRequest& req) {
 // ── event handlers
 // ────────────────────────────────────────────────────────────
 
+static std::string SubstituteVars(const std::string& s,
+                                  const std::map<std::string, std::string>& vars) {
+    std::string out = s;
+    for (auto& [k, v] : vars) {
+        std::string ph = "{{" + k + "}}";
+        for (size_t pos = 0; (pos = out.find(ph, pos)) != std::string::npos;)
+            out.replace(pos, ph.size(), v);
+    }
+    return out;
+}
+
 void RequestTab::OnSend(wxCommandEvent&) {
     m_sendButton->Disable();
     m_statusLabel->SetLabel("Sending...");
 
     // snapshot everything the thread needs — no this access inside the thread body
     HttpRequest req = BuildCurrentRequest();
+
+    // substitute {{variable}} placeholders with collection variables
+    if (getVariables) {
+        auto vars = getVariables();
+        if (!vars.empty()) {
+            req.url = SubstituteVars(req.url, vars);
+            for (auto& entry : req.headers)
+                entry.second = SubstituteVars(entry.second, vars);
+            req.body = SubstituteVars(req.body, vars);
+        }
+    }
     auto alive = m_alive;
     auto gate = m_gate;
     RequestTab* self = this;

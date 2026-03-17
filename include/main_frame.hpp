@@ -12,6 +12,7 @@
 #include <wx/wx.h>
 
 #include "app_gate.hpp"
+#include "collection_tab.hpp"
 #include "db_store.hpp"
 #include "request_tab.hpp"
 
@@ -20,7 +21,7 @@
 
 class CollectionItemData : public wxTreeItemData {
 public:
-    enum class Type { Folder, Request };
+    enum class Type { Collection, Folder, Request };
     Type type;
     int64_t id;
     CollectionItemData(Type t, int64_t i) : type(t), id(i) {}
@@ -32,6 +33,8 @@ enum {
     ID_TREE_RENAME,
     ID_TREE_DELETE,
     ID_TREE_LOAD,
+    ID_TREE_NEW_COLLECTION,
+    ID_TREE_OPEN_COLLECTION,
 };
 
 struct HistoryItem {
@@ -48,6 +51,7 @@ public:
 
     void ToggleSidebar(); // called from GTK header bar button
     void DoNewTab();      // called from GTK header bar button
+    void DoImport();      // called from GTK header bar button
 
 private:
     // layout
@@ -83,12 +87,16 @@ private:
     // tab management
     RequestTab* NewTab(const std::string& name = "New Request");
     void OpenInTab(const HttpRequest& req, const std::string& name, int64_t savedId = 0);
+    void OpenInCollectionTab(int64_t collectionId, const std::string& name);
 
     // collections tree
     void RebuildTree();
-    void BuildTreeBranch(wxTreeItemId parent, int64_t parentId);
+    void BuildTreeBranch(wxTreeItemId parent, int64_t collectionId, int64_t parentFolderId);
+    int64_t ContextCollectionId() const;
     int64_t ContextFolderId() const;
+    int64_t GetOrAutoSelectCollection();
     int64_t SaveRequest(const HttpRequest& req, const std::string& suggestedName);
+    void ImportSwagger(const std::string& path);
     void AddToHistory(const HttpRequest& req);
 
     // event handlers
@@ -105,7 +113,9 @@ private:
 
     void OnMenuNewRequest(wxCommandEvent&);
     void OnMenuNewFolder(wxCommandEvent&);
+    void OnMenuNewCollection(wxCommandEvent&);
     void OnMenuRename(wxCommandEvent&);
     void OnMenuDelete(wxCommandEvent&);
     void OnMenuLoad(wxCommandEvent&);
+    void OnMenuOpenCollection(wxCommandEvent&);
 };

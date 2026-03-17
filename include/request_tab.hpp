@@ -49,6 +49,8 @@ public:
     std::function<void(const HttpRequest&)> onRequestComplete;
     // fired on Ctrl+S; main frame decides save-new vs update
     std::function<void(const HttpRequest&, const std::string&)> onSave;
+    // returns collection variables for {{var}} substitution at send time
+    std::function<std::map<std::string, std::string>()> getVariables;
 
 private:
     std::string m_name;

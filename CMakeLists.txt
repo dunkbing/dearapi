@@ -46,6 +46,7 @@ find_package(OpenSSL REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # GTK header bar (Linux only)
 # We only need the include paths — symbols come from wxWidgets' transitive GTK link.
@@ -68,6 +69,7 @@ add_executable(dearapi
     src/http_client.cpp
     src/db_store.cpp
     src/curl_parser.cpp
+    src/collection_tab.cpp
 )
 
 # ── tests ──────────────────────────────────────────────────────────────────────
@@ -91,6 +93,7 @@ target_link_libraries(dearapi PRIVATE
     Threads::Threads
     unofficial::sqlite3::sqlite3
     ZLIB::ZLIB
+    nlohmann_json::nlohmann_json
 )
 
 if(UNIX AND NOT APPLE AND WX_GTK_INCLUDE_DIRS)
