@@ -5,6 +5,8 @@
 #include <wx/filename.h>
 #include <wx/listbox.h>
 #include <wx/notebook.h>
+#include <wx/simplebook.h>
+#include <wx/splitter.h>
 #include <wx/stdpaths.h>
 #include <wx/treectrl.h>
 #include <wx/wx.h>
@@ -44,15 +46,15 @@ class MainFrame : public wxFrame {
 public:
     explicit MainFrame(std::shared_ptr<AppGate> gate);
 
-private:
-    // top bar
-    wxButton* m_toggleBtn{};
-    wxButton* m_newTabBtn{};
+    void ToggleSidebar(); // called from GTK header bar button
+    void DoNewTab();      // called from GTK header bar button
 
+private:
     // layout
-    wxPanel* m_contentPanel{};
+    wxSplitterWindow* m_splitter{};
     wxPanel* m_sidebar{};
     bool m_sidebarVisible{true};
+    int m_sidebarWidth{240};
 
     // sidebar tabs
     wxNotebook* m_sidebarTabs{};
@@ -70,10 +72,13 @@ private:
     // app-level posting gate (outlives all tabs)
     std::shared_ptr<AppGate> m_gate;
 
-    // main tab area
+    // right-side: switches between empty placeholder and notebook
+    wxSimplebook* m_rightBook{};
     wxAuiNotebook* m_notebook{};
 
     void BuildUI();
+    void SetupTitlebar();
+    void UpdateRightView();
 
     // tab management
     RequestTab* NewTab(const std::string& name = "New Request");
@@ -86,11 +91,7 @@ private:
     int64_t SaveRequest(const HttpRequest& req, const std::string& suggestedName);
     void AddToHistory(const HttpRequest& req);
 
-    // arrow bitmap for toggle
-    static wxBitmap ArrowBitmap(bool pointLeft);
-
     // event handlers
-    void OnToggleSidebar(wxCommandEvent&);
     void OnNewTab(wxCommandEvent&);
 
     void OnHistorySelect(wxCommandEvent&);
@@ -100,7 +101,7 @@ private:
     void OnTreeBeginDrag(wxTreeEvent&);
     void OnTreeEndDrag(wxTreeEvent&);
     void OnTreeEndLabelEdit(wxTreeEvent&);
-    void OnTreeMenu(wxTreeEvent&);
+    void OnTreeContextMenu(wxContextMenuEvent&);
 
     void OnMenuNewRequest(wxCommandEvent&);
     void OnMenuNewFolder(wxCommandEvent&);

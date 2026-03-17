@@ -46,6 +46,20 @@ find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 
+# GTK header bar (Linux only)
+# We only need the include paths — symbols come from wxWidgets' transitive GTK link.
+# Linking a second copy of GTK would cause GObject type-registration conflicts.
+if(UNIX AND NOT APPLE)
+    find_package(PkgConfig REQUIRED)
+    # Detect which GTK version wxWidgets was compiled against
+    if("${wxWidgets_LIBRARIES}" MATCHES "gtk-4")
+        pkg_check_modules(WX_GTK REQUIRED gtk4)
+    else()
+        pkg_check_modules(WX_GTK REQUIRED gtk+-3.0)
+    endif()
+    message(STATUS "wxWidgets GTK backend: ${WX_GTK_LIBRARIES}")
+endif()
+
 add_executable(dearapi
     src/main.cpp
     src/main_frame.cpp
@@ -76,6 +90,10 @@ target_link_libraries(dearapi PRIVATE
     Threads::Threads
     unofficial::sqlite3::sqlite3
 )
+
+if(UNIX AND NOT APPLE AND WX_GTK_INCLUDE_DIRS)
+    target_include_directories(dearapi PRIVATE ${WX_GTK_INCLUDE_DIRS})
+endif()
 
 set_target_properties(dearapi PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}

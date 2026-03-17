@@ -2,6 +2,10 @@
 #include <wx/artprov.h>
 #include <wx/aui/tabart.h>
 
+#ifdef __WXGTK__
+#include <gtk/gtk.h>
+#endif
+
 // ── custom tab art: bold title when dirty
 // ─────────────────────────────────────
 
@@ -35,32 +39,8 @@ private:
     wxFont m_base, m_bold;
 };
 
-// ── arrow bitmap
-// ──────────────────────────────────────────────────────────────
-
-wxBitmap MainFrame::ArrowBitmap(bool pointLeft) {
-    const int S = 14;
-    wxBitmap bmp(S, S);
-    wxMemoryDC dc;
-    dc.SelectObject(bmp);
-    dc.SetBackground(wxBrush(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE)));
-    dc.Clear();
-    dc.SetBrush(wxBrush(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
-    dc.SetPen(wxPen(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
-    wxPoint pts[3];
-    if (pointLeft) {
-        pts[0] = {S - 3, 2};
-        pts[1] = {S - 3, S - 3};
-        pts[2] = {2, S / 2};
-    } else {
-        pts[0] = {3, 2};
-        pts[1] = {3, S - 3};
-        pts[2] = {S - 2, S / 2};
-    }
-    dc.DrawPolygon(3, pts);
-    dc.SelectObject(wxNullBitmap);
-    return bmp;
-}
+// ── bitmaps
+// ────────────────────────────────────────────────────────────────────
 
 // ── constructor
 // ───────────────────────────────────────────────────────────────
@@ -73,6 +53,7 @@ MainFrame::MainFrame(std::shared_ptr<AppGate> gate)
     wxFileName::Mkdir(dataDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
     m_db->open((dataDir + wxFILE_SEP_PATH + "collections.db").ToStdString());
 
+    SetupTitlebar();
     BuildUI();
     Centre();
 }
@@ -84,29 +65,13 @@ void MainFrame::BuildUI() {
     auto* panel = new wxPanel(this);
     auto* root = new wxBoxSizer(wxVERTICAL);
 
-    // ── top bar ──────────────────────────────────────────────────────────────
-    auto* bar = new wxPanel(panel);
-    auto* barSizer = new wxBoxSizer(wxHORIZONTAL);
-
-    m_toggleBtn = new wxButton(bar, wxID_ANY, "", wxDefaultPosition, wxSize(32, 32));
-    m_toggleBtn->SetBitmap(ArrowBitmap(true));
-    m_toggleBtn->SetToolTip("Toggle sidebar");
-
-    m_newTabBtn =
-        new wxButton(bar, wxID_ANY, "+ New Tab", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
-
-    barSizer->Add(m_toggleBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
-    barSizer->Add(m_newTabBtn, 0, wxALIGN_CENTER_VERTICAL);
-    bar->SetSizer(barSizer);
-
-    // ── content (sidebar | notebook) ─────────────────────────────────────────
-    m_contentPanel = new wxPanel(panel);
-    auto* contentSizer = new wxBoxSizer(wxHORIZONTAL);
+    // ── splitter: sidebar | right ─────────────────────────────────────────────
+    m_splitter = new wxSplitterWindow(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                      wxSP_LIVE_UPDATE | wxSP_THIN_SASH);
+    m_splitter->SetMinimumPaneSize(150);
 
     // ── sidebar ──────────────────────────────────────────────────────────────
-    m_sidebar = new wxPanel(m_contentPanel);
-    m_sidebar->SetMinSize(wxSize(240, -1));
-    m_sidebar->SetMaxSize(wxSize(240, -1));
+    m_sidebar = new wxPanel(m_splitter);
     auto* sidebarSizer = new wxBoxSizer(wxVERTICAL);
     m_sidebarTabs = new wxNotebook(m_sidebar, wxID_ANY);
 
@@ -114,16 +79,9 @@ void MainFrame::BuildUI() {
     auto* collPanel = new wxPanel(m_sidebarTabs);
     auto* collSizer = new wxBoxSizer(wxVERTICAL);
 
-    auto* collBar = new wxBoxSizer(wxHORIZONTAL);
-    auto* newReqBtn = new wxButton(collPanel, wxID_ANY, "+ Request", wxDefaultPosition,
-                                   wxDefaultSize, wxBU_EXACTFIT);
-    auto* newFolderBtn = new wxButton(collPanel, wxID_ANY, "+ Folder", wxDefaultPosition,
-                                      wxDefaultSize, wxBU_EXACTFIT);
-    collBar->Add(newReqBtn, 1, wxEXPAND | wxRIGHT, 2);
-    collBar->Add(newFolderBtn, 1, wxEXPAND);
-
     m_tree = new wxTreeCtrl(collPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                            wxTR_HAS_BUTTONS | wxTR_HIDE_ROOT | wxTR_EDIT_LABELS | wxTR_SINGLE);
+                            wxTR_HAS_BUTTONS | wxTR_HIDE_ROOT | wxTR_EDIT_LABELS | wxTR_SINGLE |
+                                wxBORDER_NONE);
     m_tree->SetFont(wxFont(wxFontInfo(9).Family(wxFONTFAMILY_TELETYPE)));
 
     // folder / file icons from system art provider
@@ -133,18 +91,15 @@ void MainFrame::BuildUI() {
     imgList->Add(wxArtProvider::GetBitmap(wxART_NORMAL_FILE, wxART_OTHER, wxSize(16, 16)));
     m_tree->AssignImageList(imgList); // tree takes ownership
 
-    collSizer->Add(collBar, 0, wxEXPAND | wxBOTTOM, 4);
     collSizer->Add(m_tree, 1, wxEXPAND);
     collPanel->SetSizer(collSizer);
     m_sidebarTabs->AddPage(collPanel, "Collections");
 
-    newReqBtn->Bind(wxEVT_BUTTON, &MainFrame::OnMenuNewRequest, this);
-    newFolderBtn->Bind(wxEVT_BUTTON, &MainFrame::OnMenuNewFolder, this);
     m_tree->Bind(wxEVT_TREE_ITEM_ACTIVATED, &MainFrame::OnTreeActivated, this);
     m_tree->Bind(wxEVT_TREE_BEGIN_DRAG, &MainFrame::OnTreeBeginDrag, this);
     m_tree->Bind(wxEVT_TREE_END_DRAG, &MainFrame::OnTreeEndDrag, this);
     m_tree->Bind(wxEVT_TREE_END_LABEL_EDIT, &MainFrame::OnTreeEndLabelEdit, this);
-    m_tree->Bind(wxEVT_TREE_ITEM_MENU, &MainFrame::OnTreeMenu, this);
+    m_tree->Bind(wxEVT_CONTEXT_MENU, &MainFrame::OnTreeContextMenu, this);
 
     RebuildTree();
 
@@ -158,7 +113,7 @@ void MainFrame::BuildUI() {
     histHeader->Add(clearBtn);
 
     m_historyList = new wxListBox(histPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0, nullptr,
-                                  wxLB_SINGLE | wxLB_HSCROLL);
+                                  wxLB_SINGLE | wxLB_HSCROLL | wxBORDER_NONE);
     m_historyList->SetFont(wxFont(wxFontInfo(9).Family(wxFONTFAMILY_TELETYPE)));
 
     histSizer->Add(histHeader, 0, wxEXPAND | wxBOTTOM, 4);
@@ -172,29 +127,105 @@ void MainFrame::BuildUI() {
     sidebarSizer->Add(m_sidebarTabs, 1, wxEXPAND);
     m_sidebar->SetSizer(sidebarSizer);
 
-    // ── main tab notebook ─────────────────────────────────────────────────────
-    m_notebook = new wxAuiNotebook(m_contentPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+    // ── right side: empty placeholder or tab notebook ─────────────────────────
+    m_rightBook = new wxSimplebook(m_splitter);
+
+    // page 0: empty state
+    auto* emptyPanel = new wxPanel(m_rightBook);
+    auto* emptySizer = new wxBoxSizer(wxVERTICAL);
+    auto* emptyBtn =
+        new wxButton(emptyPanel, wxID_ANY, "New Request", wxDefaultPosition, wxSize(160, 50));
+    emptyBtn->SetFont(emptyBtn->GetFont().Larger());
+    emptySizer->AddStretchSpacer();
+    emptySizer->Add(emptyBtn, 0, wxALIGN_CENTER_HORIZONTAL);
+    emptySizer->AddStretchSpacer();
+    emptyPanel->SetSizer(emptySizer);
+    m_rightBook->AddPage(emptyPanel, "");
+    emptyBtn->Bind(wxEVT_BUTTON, &MainFrame::OnNewTab, this);
+
+    // page 1: notebook
+    m_notebook = new wxAuiNotebook(m_rightBook, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                    wxAUI_NB_TOP | wxAUI_NB_CLOSE_ON_ALL_TABS |
                                        wxAUI_NB_SCROLL_BUTTONS | wxAUI_NB_TAB_MOVE);
-
     m_notebook->SetArtProvider(new DearTabArt());
+    m_rightBook->AddPage(m_notebook, "");
+    m_rightBook->SetSelection(0); // start on empty state
 
-    contentSizer->Add(m_sidebar, 0, wxEXPAND | wxRIGHT, 6);
-    contentSizer->Add(m_notebook, 1, wxEXPAND);
-    m_contentPanel->SetSizer(contentSizer);
+    m_notebook->Bind(wxEVT_AUINOTEBOOK_PAGE_CLOSED,
+                     [this](wxAuiNotebookEvent&) { UpdateRightView(); });
 
-    root->Add(bar, 0, wxEXPAND | wxALL, 8);
-    root->Add(m_contentPanel, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+    m_splitter->SplitVertically(m_sidebar, m_rightBook, m_sidebarWidth);
+
+    root->Add(m_splitter, 1, wxEXPAND | wxALL, 8);
     panel->SetSizer(root);
-
-    m_toggleBtn->Bind(wxEVT_BUTTON, &MainFrame::OnToggleSidebar, this);
-    m_newTabBtn->Bind(wxEVT_BUTTON, &MainFrame::OnNewTab, this);
 }
 
 // ── tab management
 // ────────────────────────────────────────────────────────────
 
+void MainFrame::SetupTitlebar() {
+#ifdef __WXGTK__
+    GtkWidget* header = gtk_header_bar_new();
+#if GTK_CHECK_VERSION(4, 0, 0)
+    gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(header), TRUE);
+#else
+    gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
+    gtk_header_bar_set_title(GTK_HEADER_BAR(header), "DearAPI");
+#endif
+
+    // sidebar toggle
+#if GTK_CHECK_VERSION(4, 0, 0)
+    GtkWidget* toggleBtn = gtk_button_new_from_icon_name("open-menu-symbolic");
+#else
+    GtkWidget* toggleBtn =
+        gtk_button_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_BUTTON);
+#endif
+    gtk_widget_set_tooltip_text(toggleBtn, "Toggle sidebar");
+    gtk_header_bar_pack_start(GTK_HEADER_BAR(header), toggleBtn);
+    g_signal_connect(toggleBtn, "clicked", G_CALLBACK(+[](GtkButton*, gpointer d) {
+                         static_cast<MainFrame*>(d)->ToggleSidebar();
+                     }),
+                     this);
+
+    // new tab
+#if GTK_CHECK_VERSION(4, 0, 0)
+    GtkWidget* addBtn = gtk_button_new_from_icon_name("list-add-symbolic");
+#else
+    GtkWidget* addBtn = gtk_button_new_from_icon_name("list-add-symbolic", GTK_ICON_SIZE_BUTTON);
+#endif
+    gtk_widget_set_tooltip_text(addBtn, "New tab");
+    gtk_header_bar_pack_start(GTK_HEADER_BAR(header), addBtn);
+    g_signal_connect(
+        addBtn, "clicked",
+        G_CALLBACK(+[](GtkButton*, gpointer d) { static_cast<MainFrame*>(d)->DoNewTab(); }), this);
+
+    gtk_window_set_titlebar(GTK_WINDOW(static_cast<GtkWidget*>(GetHandle())), header);
+#if !GTK_CHECK_VERSION(4, 0, 0)
+    gtk_widget_show_all(header);
+#endif
+#endif
+}
+
+void MainFrame::ToggleSidebar() {
+    m_sidebarVisible = !m_sidebarVisible;
+    if (m_sidebarVisible) {
+        m_splitter->SplitVertically(m_sidebar, m_rightBook, m_sidebarWidth);
+    } else {
+        m_sidebarWidth = m_splitter->GetSashPosition();
+        m_splitter->Unsplit(m_sidebar);
+    }
+}
+
+void MainFrame::DoNewTab() {
+    NewTab();
+}
+
+void MainFrame::UpdateRightView() {
+    m_rightBook->SetSelection(m_notebook->GetPageCount() > 0 ? 1 : 0);
+}
+
 RequestTab* MainFrame::NewTab(const std::string& name) {
+    m_rightBook->SetSelection(1); // show notebook before adding page
     auto* tab = new RequestTab(m_notebook, name, m_gate);
 
     tab->onSave = [this, tab](const HttpRequest& req, const std::string& suggested) {
@@ -260,16 +291,6 @@ void MainFrame::OnHistorySelect(wxCommandEvent&) {
 void MainFrame::OnClearHistory(wxCommandEvent&) {
     m_history.clear();
     m_historyList->Clear();
-}
-
-// ── sidebar toggle
-// ────────────────────────────────────────────────────────────
-
-void MainFrame::OnToggleSidebar(wxCommandEvent&) {
-    m_sidebarVisible = !m_sidebarVisible;
-    m_sidebar->Show(m_sidebarVisible);
-    m_toggleBtn->SetBitmap(ArrowBitmap(m_sidebarVisible));
-    m_contentPanel->Layout();
 }
 
 void MainFrame::OnNewTab(wxCommandEvent&) {
@@ -414,8 +435,52 @@ void MainFrame::OnTreeEndLabelEdit(wxTreeEvent& evt) {
     }
 }
 
-void MainFrame::OnTreeMenu(wxTreeEvent& evt) {
-    auto item = evt.GetItem();
+void MainFrame::OnTreeContextMenu(wxContextMenuEvent& evt) {
+    // resolve which item (if any) was right-clicked
+    wxTreeItemId item;
+    wxPoint screenPos = evt.GetPosition();
+    if (screenPos != wxDefaultPosition) {
+        int flags = 0;
+        item = m_tree->HitTest(m_tree->ScreenToClient(screenPos), flags);
+        if (!(flags & (wxTREE_HITTEST_ONITEMLABEL | wxTREE_HITTEST_ONITEM |
+                       wxTREE_HITTEST_ONITEMINDENT | wxTREE_HITTEST_ONITEMBUTTON)))
+            item = wxTreeItemId{};
+    } else {
+        item = m_tree->GetSelection();
+    }
+
+    if (!item.IsOk()) {
+        // background click — create at root (folderId = 0)
+        wxMenu menu;
+        menu.Append(ID_TREE_NEW_REQUEST, "New Request");
+        menu.Append(ID_TREE_NEW_FOLDER, "New Folder");
+        menu.Bind(
+            wxEVT_MENU,
+            [this](wxCommandEvent&) {
+                wxString name =
+                    wxGetTextFromUser("Request name:", "New Request", "New Request", this);
+                if (name.IsEmpty())
+                    return;
+                HttpRequest blank{"GET", "https://"};
+                m_db->saveRequest(name.ToStdString(), 0, blank);
+                RebuildTree();
+            },
+            ID_TREE_NEW_REQUEST);
+        menu.Bind(
+            wxEVT_MENU,
+            [this](wxCommandEvent&) {
+                wxString name = wxGetTextFromUser("Folder name:", "New Folder", "New Folder", this);
+                if (name.IsEmpty())
+                    return;
+                m_db->createFolder(name.ToStdString(), 0);
+                RebuildTree();
+            },
+            ID_TREE_NEW_FOLDER);
+        PopupMenu(&menu);
+        return;
+    }
+
+    // item click — standard context menu
     m_tree->SelectItem(item);
     auto* d = dynamic_cast<CollectionItemData*>(m_tree->GetItemData(item));
 
